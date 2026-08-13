@@ -114,7 +114,7 @@ export default function Admin() {
       body: JSON.stringify({
         participant_id: selectedThottie.id,
         log_date: logDate,
-        steps: Number(logSteps),
+        steps: Number(logSteps.replace(/[^0-9]/g, "")),
         workout: workoutCompleted ? 1 : 0,
         yoga: yogaCompleted ? 1 : 0,
       }),
@@ -132,11 +132,31 @@ export default function Admin() {
     }
   };
 
+  // Quote-aware CSV line splitter (preserves "10,127" as a single column)
+  const splitCsvLine = (line: string): string[] => {
+    const result: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim().replace(/^"|"$/g, ""));
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim().replace(/^"|"$/g, ""));
+    return result;
+  };
+
   const parseDateStr = (raw: string): string | null => {
     if (!raw) return null;
 
-    // Strip weekday names (Mon, Tue, Wed, Thu, Fri, Sat, Sun) and extra spaces
-    let clean = raw.trim().replace(/^(mon|tue|wed|thu|fri|sat|sun)\w*\s*/i, "");
+    let clean = raw.trim().replace(/^"|"$/g, "");
+    clean = clean.replace(/^(mon|tue|wed|thu|fri|sat|sun)\w*\s*/i, "");
 
     if (clean.match(/^\d{4}-\d{2}-\d{2}$/)) return clean;
 
@@ -164,11 +184,11 @@ export default function Admin() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        setCsvStatus("Processing spreadsheet...");
+        setCsvStatus("Processing spreadsheet with formatted numbers...");
         const text = event.target?.result as string;
-        const lines = text.split("\n").map((l) => l.split(",").map((c) => c.trim()));
+        const rawLines = text.split("\n").filter((l) => l.trim().length > 0);
+        const lines = rawLines.map(splitCsvLine);
 
-        // Extract participant name from top of spreadsheet
         let nameInSheet = "";
         for (let i = 0; i < Math.min(lines.length, 5); i++) {
           const val = lines[i][0] || "";
@@ -227,9 +247,14 @@ export default function Admin() {
           for (let col = 0; col < datesLine.length; col++) {
             const parsedDate = parseDateStr(datesLine[col]);
             if (parsedDate) {
-              const steps = parseInt(stepsLine[col], 10) || 0;
-              const workoutVal = parseFloat(workoutLine[col]) || 0;
-              const yogaVal = parseFloat(yogaLine[col]) || 0;
+              const rawSteps = (stepsLine[col] || "").replace(/[^0-9]/g, "");
+              const steps = parseInt(rawSteps, 10) || 0;
+
+              const rawWorkout = (workoutLine[col] || "").replace(/[^0-9.]/g, "");
+              const workoutVal = parseFloat(rawWorkout) || 0;
+
+              const rawYoga = (yogaLine[col] || "").replace(/[^0-9.]/g, "");
+              const yogaVal = parseFloat(rawYoga) || 0;
 
               if (steps > 0 || workoutVal > 0 || yogaVal > 0) {
                 logs.push({
@@ -413,8 +438,8 @@ export default function Admin() {
                 <Footprints className="size-3.5" /> Steps
               </label>
               <input
-                type="number"
-                placeholder="e.g. 8432"
+                type="text"
+                placeholder="e.g. 8,432"
                 value={logSteps}
                 onChange={(e) => setLogSteps(e.target.value)}
                 className="w-full bg-white border border-gray-300 rounded-md px-3 py-1.5 text-sm"
