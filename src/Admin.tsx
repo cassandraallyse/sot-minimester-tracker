@@ -157,16 +157,16 @@ export default function Admin() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        setCsvStatus("Processing spreadsheet for all participants...");
+        setCsvStatus("Processing Minimester tracking sheet...");
         const text = event.target?.result as string;
         const lines = text.split("\n").map((l) => l.split(",").map((c) => c.trim()));
 
-        // Identify participant name from top of sheet (Row 1 or 2)
+        // Identify participant name from header
         let nameInSheet = "";
         for (let i = 0; i < Math.min(lines.length, 5); i++) {
-          const firstCol = lines[i][0] || "";
-          if (firstCol && !firstCol.toLowerCase().includes("step") && !firstCol.toLowerCase().includes("goal")) {
-            nameInSheet = firstCol;
+          const val = lines[i][0] || "";
+          if (val && !val.toLowerCase().includes("step") && !val.toLowerCase().includes("goal")) {
+            nameInSheet = val;
             break;
           }
         }
@@ -177,7 +177,6 @@ export default function Admin() {
           nameInSheet.toLowerCase().includes(p.name.toLowerCase())
         ) || selectedThottie;
 
-        // If no existing participant matches, auto-create participant from sheet name
         if (!targetParticipant && nameInSheet) {
           const newP = await addParticipantMutation.mutateAsync({
             name: nameInSheet,
@@ -189,31 +188,40 @@ export default function Admin() {
         }
 
         if (!targetParticipant) {
-          setCsvStatus("Could not determine participant from sheet. Please create or select a Thottie.");
+          setCsvStatus("Could not find or create participant from sheet.");
           return;
         }
 
-        let dateRowIdx = -1;
+        // Locate rows containing Steps, Workout, Yoga
         let stepsRowIdx = -1;
         let workoutRowIdx = -1;
         let yogaRowIdx = -1;
+        let dateRowIdx = -1;
 
         for (let i = 0; i < lines.length; i++) {
           const header = (lines[i][0] || "").toLowerCase();
-          if (header.includes("date")) dateRowIdx = i;
           if (header.includes("step")) stepsRowIdx = i;
           if (header.includes("workout")) workoutRowIdx = i;
           if (header.includes("yoga")) yogaRowIdx = i;
+
+          // Check if line contains date entries across columns
+          for (let col = 0; col < lines[i].length; col++) {
+            if (parseDateStr(lines[i][col])) {
+              dateRowIdx = i;
+              break;
+            }
+          }
         }
 
         const logs = [];
+
         if (dateRowIdx !== -1 && stepsRowIdx !== -1) {
           const datesLine = lines[dateRowIdx];
           const stepsLine = lines[stepsRowIdx] || [];
           const workoutLine = workoutRowIdx !== -1 ? lines[workoutRowIdx] : [];
           const yogaLine = yogaRowIdx !== -1 ? lines[yogaRowIdx] : [];
 
-          for (let col = 1; col < datesLine.length; col++) {
+          for (let col = 0; col < datesLine.length; col++) {
             const parsedDate = parseDateStr(datesLine[col]);
             if (parsedDate) {
               const steps = parseInt(stepsLine[col], 10) || 0;
@@ -233,7 +241,7 @@ export default function Admin() {
         }
 
         if (logs.length === 0) {
-          setCsvStatus("No logged step/workout entries found in file.");
+          setCsvStatus("No logged step/workout values found in spreadsheet.");
           return;
         }
 
