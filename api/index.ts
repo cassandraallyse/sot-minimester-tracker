@@ -301,20 +301,18 @@ app.post("/app-api/logs/bulk", async (c) => {
       return c.json({ error: "participant_id and a non-empty logs array are required" }, 400);
     }
 
-    await Promise.all(
-      logs.map((entry: any) =>
-        sql`
-          INSERT INTO sot_daily_logs (participant_id, log_date, steps, workout, yoga, updated_at)
-          VALUES (${participant_id}, ${entry.log_date}, ${entry.steps ?? 0}, ${entry.workout ?? 0}, ${entry.yoga ?? 0}, NOW())
-          ON CONFLICT (participant_id, log_date)
-          DO UPDATE SET
-            steps = EXCLUDED.steps,
-            workout = EXCLUDED.workout,
-            yoga = EXCLUDED.yoga,
-            updated_at = NOW()
-        `
-      )
-    );
+    for (const entry of logs) {
+      await sql`
+        INSERT INTO sot_daily_logs (participant_id, log_date, steps, workout, yoga, updated_at)
+        VALUES (${Number(participant_id)}, ${entry.log_date}, ${Number(entry.steps) || 0}, ${Number(entry.workout) || 0}, ${Number(entry.yoga) || 0}, NOW())
+        ON CONFLICT (participant_id, log_date)
+        DO UPDATE SET
+          steps = EXCLUDED.steps,
+          workout = EXCLUDED.workout,
+          yoga = EXCLUDED.yoga,
+          updated_at = NOW()
+      `;
+    }
 
     return c.json({ success: true, count: logs.length });
   } catch (err: any) {
@@ -336,7 +334,4 @@ app.delete("/app-api/logs/:id", async (c) => {
   }
 });
 
-export const GET = handle(app);
-export const POST = handle(app);
-export const DELETE = handle(app);
 export default app;
