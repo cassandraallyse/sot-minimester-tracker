@@ -156,20 +156,33 @@ export default function Admin() {
     if (!raw) return null;
 
     let clean = raw.trim().replace(/^"|"$/g, "");
+    // Ignore excel errors, summary text, or non-date strings
+    if (clean.includes("#") || clean.toLowerCase().includes("total") || clean.toLowerCase().includes("week")) {
+      return null;
+    }
+
     clean = clean.replace(/^(mon|tue|wed|thu|fri|sat|sun)\w*\s*/i, "");
 
     if (clean.match(/^\d{4}-\d{2}-\d{2}$/)) return clean;
 
     const parts = clean.split(/[\/\-]/);
     if (parts.length === 2) {
-      const month = parts[0].padStart(2, "0");
-      const day = parts[1].padStart(2, "0");
-      return `2026-${month}-${day}`;
+      const m = parseInt(parts[0], 10);
+      const d = parseInt(parts[1], 10);
+      if (!isNaN(m) && !isNaN(d) && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        const month = String(m).padStart(2, "0");
+        const day = String(d).padStart(2, "0");
+        return `2026-${month}-${day}`;
+      }
     } else if (parts.length === 3) {
-      const month = parts[0].padStart(2, "0");
-      const day = parts[1].padStart(2, "0");
-      const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
-      return `${year}-${month}-${day}`;
+      const m = parseInt(parts[0], 10);
+      const d = parseInt(parts[1], 10);
+      if (!isNaN(m) && !isNaN(d) && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        const month = String(m).padStart(2, "0");
+        const day = String(d).padStart(2, "0");
+        const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+        return `${year}-${month}-${day}`;
+      }
     }
     return null;
   };
@@ -184,7 +197,7 @@ export default function Admin() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        setCsvStatus("Processing spreadsheet with formatted numbers...");
+        setCsvStatus("Processing spreadsheet...");
         const text = event.target?.result as string;
         const rawLines = text.split("\n").filter((l) => l.trim().length > 0);
         const lines = rawLines.map(splitCsvLine);
