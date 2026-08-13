@@ -132,8 +132,27 @@ export default function Admin() {
     }
   };
 
+  const parseDateStr = (raw: string): string | null => {
+    if (!raw) return null;
+    const clean = raw.trim();
+    if (clean.match(/^\d{4}-\d{2}-\d{2}$/)) return clean;
+
+    const parts = clean.split("/");
+    if (parts.length === 3) {
+      const month = parts[0].padStart(2, "0");
+      const day = parts[1].padStart(2, "0");
+      const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+      return `${year}-${month}-${day}`;
+    }
+    return null;
+  };
+
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedThottie) {
+      setCsvStatus("Please choose a Thottie in Step 1 above before uploading.");
+      return;
+    }
     if (!csvFile) {
       setCsvStatus("Please choose a CSV file first.");
       return;
@@ -142,27 +161,73 @@ export default function Admin() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        setCsvStatus("Processing file...");
+        setCsvStatus("Processing spreadsheet...");
         const text = event.target?.result as string;
-        const lines = text.trim().split("\n");
+        const lines = text.split("\n").map((l) => l.split(",").map((c) => c.trim()));
+
         const logs = [];
 
-        for (const line of lines) {
-          const parts = line.split(",").map((s) => s.trim());
-          if (parts.length >= 2) {
-            const dateStr = parts[0];
-            const steps = parseInt(parts[1], 10) || 0;
-            const workout = parts[2] ? parseInt(parts[2], 10) : 0;
-            const yoga = parts[3] ? parseInt(parts[3], 10) : 0;
+        // Check if this is horizontal Minimester Tracking Sheet (Date row on line 7 / index 6)
+        let isHorizontalSheet = false;
+        let dateRowIdx = -1;
+        let stepsRowIdx = -1;
+        let workoutRowIdx = -1;
+        let yogaRowIdx = -1;
 
-            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              logs.push({ log_date: dateStr, steps, workout, yoga });
+        for (let i = 0; i < Math.min(lines.length, 15); i++) {
+          const rowHeader = (lines[i][0] || "").toLowerCase();
+          if (rowHeader.includes("date")) dateRowIdx = i;
+          if (rowHeader.includes("step")) stepsRowIdx = i;
+          if (rowHeader.includes("workout")) workoutRowIdx = i;
+          if (rowHeader.includes("yoga")) yogaRowIdx = i;
+        }
+
+        if (dateRowIdx !== -1 && stepsRowIdx !== -1) {
+          isHorizontalSheet = true;
+        }
+
+        if (isHorizontalSheet) {
+          const datesLine = lines[dateRowIdx];
+          const stepsLine = lines[stepsRowIdx] || [];
+          const workoutLine = workoutRowIdx !== -1 ? lines[workoutRowIdx] : [];
+          const yogaLine = yogaRowIdx !== -1 ? lines[yogaRowIdx] : [];
+
+          for (let col = 1; col < datesLine.length; col++) {
+            const rawDate = datesLine[col];
+            const parsedDate = parseDateStr(rawDate);
+            if (parsedDate) {
+              const steps = parseInt(stepsLine[col], 10) || 0;
+              const workoutVal = parseFloat(workoutLine[col]) || 0;
+              const yogaVal = parseFloat(yogaLine[col]) || 0;
+
+              if (steps > 0 || workoutVal > 0 || yogaVal > 0) {
+                logs.push({
+                  log_date: parsedDate,
+                  steps,
+                  workout: workoutVal > 0 ? 1 : 0,
+                  yoga: yogaVal > 0 ? 1 : 0,
+                });
+              }
+            }
+          }
+        } else {
+          // Fallback: Standard line-by-line format (YYYY-MM-DD, steps, workout, yoga)
+          for (const line of lines) {
+            if (line.length >= 2) {
+              const formattedDate = parseDateStr(line[0]);
+              const steps = parseInt(line[1], 10) || 0;
+              const workout = line[2] ? parseInt(line[2], 10) : 0;
+              const yoga = line[3] ? parseInt(line[3], 10) : 0;
+
+              if (formattedDate) {
+                logs.push({ log_date: formattedDate, steps, workout, yoga });
+              }
             }
           }
         }
 
-        if (logs.length === 0 || !selectedThottie) {
-          setCsvStatus("Please select a Thottie and ensure CSV has format: YYYY-MM-DD, steps, workout, yoga");
+        if (logs.length === 0) {
+          setCsvStatus("No logged values found in file for dates.");
           return;
         }
 
@@ -176,12 +241,12 @@ export default function Admin() {
         });
 
         if (res.ok) {
-          setCsvStatus(`Successfully uploaded ${logs.length} logs!`);
+          setCsvStatus(`Successfully uploaded ${logs.length} daily logs for ${selectedThottie.name}!`);
           setCsvFile(null);
           refetchLogs();
           queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
         } else {
-          setCsvStatus("Error uploading spreadsheet.");
+          setCsvStatus("Error saving entries to database.");
         }
       } catch (err: any) {
         setCsvStatus(`Error: ${err.message}`);
@@ -287,7 +352,7 @@ export default function Admin() {
           {/* Step 1: Choose Thottie Grid */}
           <div className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-3">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-600">
-              Step 1: Choose Thottie (For Single Entry)
+              Step 1: Choose Thottie
             </h2>
             <div className="grid grid-cols-2 gap-2">
               {participants.map((p) => (
