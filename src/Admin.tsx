@@ -157,11 +157,11 @@ export default function Admin() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        setCsvStatus("Processing Minimester tracking sheet...");
+        setCsvStatus("Processing spreadsheet...");
         const text = event.target?.result as string;
         const lines = text.split("\n").map((l) => l.split(",").map((c) => c.trim()));
 
-        // Identify participant name from header
+        // Extract participant name from row 1 or 2
         let nameInSheet = "";
         for (let i = 0; i < Math.min(lines.length, 5); i++) {
           const val = lines[i][0] || "";
@@ -171,28 +171,26 @@ export default function Admin() {
           }
         }
 
-        // Find participant in database matching sheet or selected thottie
-        let targetParticipant = participants.find((p) =>
+        // Match against existing roster or create
+        let targetParticipant = selectedThottie || participants.find((p) =>
           p.name.toLowerCase().includes(nameInSheet.toLowerCase()) ||
           nameInSheet.toLowerCase().includes(p.name.toLowerCase())
-        ) || selectedThottie;
+        );
 
         if (!targetParticipant && nameInSheet) {
-          const newP = await addParticipantMutation.mutateAsync({
+          targetParticipant = await addParticipantMutation.mutateAsync({
             name: nameInSheet,
             location: "",
             steps_goal: 280000,
             workouts_goal: 12,
           });
-          targetParticipant = newP;
         }
 
         if (!targetParticipant) {
-          setCsvStatus("Could not find or create participant from sheet.");
+          setCsvStatus("Please select or add a Thottie before uploading.");
           return;
         }
 
-        // Locate rows containing Steps, Workout, Yoga
         let stepsRowIdx = -1;
         let workoutRowIdx = -1;
         let yogaRowIdx = -1;
@@ -204,7 +202,6 @@ export default function Admin() {
           if (header.includes("workout")) workoutRowIdx = i;
           if (header.includes("yoga")) yogaRowIdx = i;
 
-          // Check if line contains date entries across columns
           for (let col = 0; col < lines[i].length; col++) {
             if (parseDateStr(lines[i][col])) {
               dateRowIdx = i;
@@ -260,7 +257,8 @@ export default function Admin() {
           refetchLogs();
           queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
         } else {
-          setCsvStatus("Error saving entries to database.");
+          const errData = await res.json().catch(() => ({}));
+          setCsvStatus(`Error saving entries: ${errData.error || "Server error"}`);
         }
       } catch (err: any) {
         setCsvStatus(`Error: ${err.message}`);
@@ -366,7 +364,7 @@ export default function Admin() {
           {/* Step 1: Choose Thottie Grid */}
           <div className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-3">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-600">
-              Step 1: Choose Thottie (Optional for CSV)
+              Step 1: Choose Thottie (For Single Entry or CSV)
             </h2>
             <div className="grid grid-cols-2 gap-2">
               {participants.map((p) => (
