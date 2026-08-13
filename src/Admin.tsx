@@ -134,11 +134,18 @@ export default function Admin() {
 
   const parseDateStr = (raw: string): string | null => {
     if (!raw) return null;
-    const clean = raw.trim();
+
+    // Strip weekday names (Mon, Tue, Wed, Thu, Fri, Sat, Sun) and extra spaces
+    let clean = raw.trim().replace(/^(mon|tue|wed|thu|fri|sat|sun)\w*\s*/i, "");
+
     if (clean.match(/^\d{4}-\d{2}-\d{2}$/)) return clean;
 
-    const parts = clean.split("/");
-    if (parts.length === 3) {
+    const parts = clean.split(/[\/\-]/);
+    if (parts.length === 2) {
+      const month = parts[0].padStart(2, "0");
+      const day = parts[1].padStart(2, "0");
+      return `2026-${month}-${day}`;
+    } else if (parts.length === 3) {
       const month = parts[0].padStart(2, "0");
       const day = parts[1].padStart(2, "0");
       const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
@@ -161,7 +168,7 @@ export default function Admin() {
         const text = event.target?.result as string;
         const lines = text.split("\n").map((l) => l.split(",").map((c) => c.trim()));
 
-        // Extract participant name from row 1 or 2
+        // Extract participant name from top of spreadsheet
         let nameInSheet = "";
         for (let i = 0; i < Math.min(lines.length, 5); i++) {
           const val = lines[i][0] || "";
@@ -171,7 +178,6 @@ export default function Admin() {
           }
         }
 
-        // Match against existing roster or create
         let targetParticipant = selectedThottie || participants.find((p) =>
           p.name.toLowerCase().includes(nameInSheet.toLowerCase()) ||
           nameInSheet.toLowerCase().includes(p.name.toLowerCase())
@@ -187,7 +193,7 @@ export default function Admin() {
         }
 
         if (!targetParticipant) {
-          setCsvStatus("Please select or add a Thottie before uploading.");
+          setCsvStatus("Please select or add a Thottie in Step 1 before uploading.");
           return;
         }
 
@@ -238,7 +244,7 @@ export default function Admin() {
         }
 
         if (logs.length === 0) {
-          setCsvStatus("No logged step/workout values found in spreadsheet.");
+          setCsvStatus("No valid step/workout rows found in file.");
           return;
         }
 
