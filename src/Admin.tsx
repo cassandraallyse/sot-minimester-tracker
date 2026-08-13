@@ -132,7 +132,6 @@ export default function Admin() {
     }
   };
 
-  // Quote-aware CSV line splitter (preserves "10,127" as a single column)
   const splitCsvLine = (line: string): string[] => {
     const result: string[] = [];
     let current = "";
@@ -156,7 +155,6 @@ export default function Admin() {
     if (!raw) return null;
 
     let clean = raw.trim().replace(/^"|"$/g, "");
-    // Ignore excel errors, summary text, or non-date strings
     if (clean.includes("#") || clean.toLowerCase().includes("total") || clean.toLowerCase().includes("week")) {
       return null;
     }
@@ -197,112 +195,128 @@ export default function Admin() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        setCsvStatus("Processing spreadsheet...");
+        setCsvStatus("Processing multi-participant spreadsheet...");
         const text = event.target?.result as string;
         const rawLines = text.split("\n").filter((l) => l.trim().length > 0);
         const lines = rawLines.map(splitCsvLine);
 
-        let nameInSheet = "";
-        for (let i = 0; i < Math.min(lines.length, 5); i++) {
-          const val = lines[i][0] || "";
-          if (val && !val.toLowerCase().includes("step") && !val.toLowerCase().includes("goal")) {
-            nameInSheet = val;
-            break;
+        // Extract dates from row 1
+        const datesRow = lines[0] || [];
+        const dateMap: { col: number; dateStr: string }[] = [];
+        for (let col = 1; col < datesRow.length; col++) {
+          const parsed = parseDateStr(datesRow[col]);
+          if (parsed) {
+            dateMap.push({ col, dateStr: parsed });
           }
         }
 
-        let targetParticipant = selectedThottie || participants.find((p) =>
-          p.name.toLowerCase().includes(nameInSheet.toLowerCase()) ||
-          nameInSheet.toLowerCase().includes(p.name.toLowerCase())
-        );
-
-        if (!targetParticipant && nameInSheet) {
-          targetParticipant = await addParticipantMutation.mutateAsync({
-            name: nameInSheet,
-            location: "",
-            steps_goal: 280000,
-            workouts_goal: 12,
-          });
-        }
-
-        if (!targetParticipant) {
-          setCsvStatus("Please select or add a Thottie in Step 1 before uploading.");
+        if (dateMap.length === 0) {
+          setCsvStatus("Could not find date headers in row 1.");
           return;
         }
 
-        let stepsRowIdx = -1;
-        let workoutRowIdx = -1;
-        let yogaRowIdx = -1;
-        let dateRowIdx = -1;
+        // Refetch latest participant list to map existing IDs
+        const currentParticipantsRes = await fetch("/app-api/participants");
+        let activeParticipants: Participant[] = await currentParticipantsRes.json();
 
-        for (let i = 0; i < lines.length; i++) {
-          const header = (lines[i][0] || "").toLowerCase();
-          if (header.includes("step")) stepsRowIdx = i;
-          if (header.includes("workout")) workoutRowIdx = i;
-          if (header.includes("yoga")) yogaRowIdx = i;
+        let importedCount = 0;
+        let importedPeople = 0;
 
-          for (let col = 0; col < lines[i].length; col++) {
-            if (parseDateStr(lines[i][col])) {
-              dateRowIdx = i;
-              break;
+        // Scan rows for participant blocks
+        for (let i = 1; i < lines.length; i++) {
+          const firstCol = (lines[i][0] || "").trim();
+          const headerLower = firstCol.toLowerCase();
+
+          // A name row is non-empty and not steps/workout/yoga/total/goal
+          if (
+            firstCol &&
+            !headerLower.includes("step") &&
+            !headerLower.includes("workout") &&
+            !headerLower.includes("yoga") &&
+            !headerLower.includes("total") &&
+            !headerLower.includes("goal")
+          ) {
+            const personName = firstCol;
+
+            // Look ahead for steps, workout, yoga rows
+            let stepsLine: string[] = [];
+            let workoutLine: string[] = [];
+            let yogaLine: string[] = [];
+
+            for (let k = i + 1; k < Math.min(i + 5, lines.length); k++) {
+              const rowLabel = (lines[k][0] || "").toLowerCase();
+              if (rowLabel.includes("step")) stepsLine = lines[k];
+              if (rowLabel.includes("workout")) workoutLine = lines[k];
+              if (rowLabel.includes("yoga")) yogaLine = lines[k];
             }
-          }
-        }
 
-        const logs = [];
+            if (stepsLine.length > 0) {
+              // Find or create participant
+              let participant = activeParticipants.find(
+                (p) => p.name.toLowerCase().trim() === personName.toLowerCase().trim()
+              );
 
-        if (dateRowIdx !== -1 && stepsRowIdx !== -1) {
-          const datesLine = lines[dateRowIdx];
-          const stepsLine = lines[stepsRowIdx] || [];
-          const workoutLine = workoutRowIdx !== -1 ? lines[workoutRowIdx] : [];
-          const yogaLine = yogaRowIdx !== -1 ? lines[yogaRowIdx] : [];
-
-          for (let col = 0; col < datesLine.length; col++) {
-            const parsedDate = parseDateStr(datesLine[col]);
-            if (parsedDate) {
-              const rawSteps = (stepsLine[col] || "").replace(/[^0-9]/g, "");
-              const steps = parseInt(rawSteps, 10) || 0;
-
-              const rawWorkout = (workoutLine[col] || "").replace(/[^0-9.]/g, "");
-              const workoutVal = parseFloat(rawWorkout) || 0;
-
-              const rawYoga = (yogaLine[col] || "").replace(/[^0-9.]/g, "");
-              const yogaVal = parseFloat(rawYoga) || 0;
-
-              if (steps > 0 || workoutVal > 0 || yogaVal > 0) {
-                logs.push({
-                  log_date: parsedDate,
-                  steps,
-                  workout: workoutVal > 0 ? 1 : 0,
-                  yoga: yogaVal > 0 ? 1 : 0,
+              if (!participant) {
+                const newP = await addParticipantMutation.mutateAsync({
+                  name: personName,
+                  location: "",
+                  steps_goal: 280000,
+                  workouts_goal: 12,
                 });
+                participant = newP;
+                activeParticipants.push(newP);
+              }
+
+              if (participant) {
+                const logs = [];
+                for (const d of dateMap) {
+                  const rawSteps = (stepsLine[d.col] || "").replace(/[^0-9]/g, "");
+                  const steps = parseInt(rawSteps, 10) || 0;
+
+                  const rawWorkout = (workoutLine[d.col] || "").replace(/[^0-9.]/g, "");
+                  const workoutVal = parseFloat(rawWorkout) || 0;
+
+                  const rawYoga = (yogaLine[d.col] || "").replace(/[^0-9.]/g, "");
+                  const yogaVal = parseFloat(rawYoga) || 0;
+
+                  if (steps > 0 || workoutVal > 0 || yogaVal > 0) {
+                    logs.push({
+                      log_date: d.dateStr,
+                      steps,
+                      workout: workoutVal > 0 ? 1 : 0,
+                      yoga: yogaVal > 0 ? 1 : 0,
+                    });
+                  }
+                }
+
+                if (logs.length > 0) {
+                  const res = await fetch("/app-api/logs/bulk", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      participant_id: participant.id,
+                      logs,
+                    }),
+                  });
+
+                  if (res.ok) {
+                    importedCount += logs.length;
+                    importedPeople++;
+                  }
+                }
               }
             }
           }
         }
 
-        if (logs.length === 0) {
-          setCsvStatus("No valid step/workout rows found in file.");
-          return;
-        }
-
-        const res = await fetch("/app-api/logs/bulk", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            participant_id: targetParticipant.id,
-            logs,
-          }),
-        });
-
-        if (res.ok) {
-          setCsvStatus(`Successfully imported ${logs.length} entries for ${targetParticipant.name}!`);
+        if (importedPeople > 0) {
+          setCsvStatus(`Successfully imported ${importedCount} logs across ${importedPeople} participants!`);
           setCsvFile(null);
           refetchLogs();
+          queryClient.invalidateQueries({ queryKey: ["admin-participants"] });
           queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
         } else {
-          const errData = await res.json().catch(() => ({}));
-          setCsvStatus(`Error saving entries: ${errData.error || "Server error"}`);
+          setCsvStatus("No valid logs imported from spreadsheet.");
         }
       } catch (err: any) {
         setCsvStatus(`Error: ${err.message}`);
