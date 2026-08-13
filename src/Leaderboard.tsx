@@ -167,26 +167,15 @@ export default function Leaderboard() {
 
   const participants: Participant[] = Array.isArray(data) ? data : data?.rows || [];
   const lastUpdated: string | null = Array.isArray(data) ? null : data?.lastUpdated || null;
-  const minLogDateStr: string = (data as LeaderboardResponse)?.minLogDate || "2026-07-13";
 
   const currentGroupObj = groups.find((g) => String(g.id) === selectedGroupId);
 
-  // Date range & week calculations adjusted for 4-WEEK MINIMESTER
-  const [sYear, sMonth, sDay] = minLogDateStr.split("T")[0].split("-").map(Number);
-  const semesterStart = new Date(sYear, sMonth - 1, sDay);
-  
-  // 4 Weeks Total
+  // Locked 4-Week Minimester Dates: Aug 10, 2026 to Sept 6, 2026
+  const semesterStart = new Date(2026, 7, 10); // Aug 10
   const TOTAL_WEEKS = 4;
-  const TOTAL_DAYS = TOTAL_WEEKS * 7;
-  const semesterEnd = new Date(semesterStart.getTime() + TOTAL_DAYS * 24 * 60 * 60 * 1000);
+  const TOTAL_DAYS = 28;
 
-  const startMonthStr = semesterStart.toLocaleDateString("en-US", { month: "long" });
-  const endMonthStr = semesterEnd.toLocaleDateString("en-US", { month: "long" });
-  const startYear = semesterStart.getFullYear();
-  const endYear = semesterEnd.getFullYear();
-  const yearLabel = startYear === endYear ? `${startYear}` : `${startYear} - ${endYear}`;
-
-  const dateRangeLabel = `${startMonthStr} through ${endMonthStr} ${yearLabel}`;
+  const dateRangeLabel = "August 10 through September 6, 2026";
 
   const now = new Date();
   const diffInMs = Math.max(0, now.getTime() - semesterStart.getTime());
