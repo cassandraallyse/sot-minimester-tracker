@@ -149,10 +149,6 @@ export default function Admin() {
 
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedThottie) {
-      setCsvStatus("Please choose a Thottie in Step 1 above before uploading.");
-      return;
-    }
     if (!csvFile) {
       setCsvStatus("Please choose a CSV file first.");
       return;
@@ -161,40 +157,64 @@ export default function Admin() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        setCsvStatus("Processing spreadsheet...");
+        setCsvStatus("Processing spreadsheet for all participants...");
         const text = event.target?.result as string;
         const lines = text.split("\n").map((l) => l.split(",").map((c) => c.trim()));
 
-        const logs = [];
+        // Identify participant name from top of sheet (Row 1 or 2)
+        let nameInSheet = "";
+        for (let i = 0; i < Math.min(lines.length, 5); i++) {
+          const firstCol = lines[i][0] || "";
+          if (firstCol && !firstCol.toLowerCase().includes("step") && !firstCol.toLowerCase().includes("goal")) {
+            nameInSheet = firstCol;
+            break;
+          }
+        }
 
-        // Check if this is horizontal Minimester Tracking Sheet (Date row on line 7 / index 6)
-        let isHorizontalSheet = false;
+        // Find participant in database matching sheet or selected thottie
+        let targetParticipant = participants.find((p) =>
+          p.name.toLowerCase().includes(nameInSheet.toLowerCase()) ||
+          nameInSheet.toLowerCase().includes(p.name.toLowerCase())
+        ) || selectedThottie;
+
+        // If no existing participant matches, auto-create participant from sheet name
+        if (!targetParticipant && nameInSheet) {
+          const newP = await addParticipantMutation.mutateAsync({
+            name: nameInSheet,
+            location: "",
+            steps_goal: 280000,
+            workouts_goal: 12,
+          });
+          targetParticipant = newP;
+        }
+
+        if (!targetParticipant) {
+          setCsvStatus("Could not determine participant from sheet. Please create or select a Thottie.");
+          return;
+        }
+
         let dateRowIdx = -1;
         let stepsRowIdx = -1;
         let workoutRowIdx = -1;
         let yogaRowIdx = -1;
 
-        for (let i = 0; i < Math.min(lines.length, 15); i++) {
-          const rowHeader = (lines[i][0] || "").toLowerCase();
-          if (rowHeader.includes("date")) dateRowIdx = i;
-          if (rowHeader.includes("step")) stepsRowIdx = i;
-          if (rowHeader.includes("workout")) workoutRowIdx = i;
-          if (rowHeader.includes("yoga")) yogaRowIdx = i;
+        for (let i = 0; i < lines.length; i++) {
+          const header = (lines[i][0] || "").toLowerCase();
+          if (header.includes("date")) dateRowIdx = i;
+          if (header.includes("step")) stepsRowIdx = i;
+          if (header.includes("workout")) workoutRowIdx = i;
+          if (header.includes("yoga")) yogaRowIdx = i;
         }
 
+        const logs = [];
         if (dateRowIdx !== -1 && stepsRowIdx !== -1) {
-          isHorizontalSheet = true;
-        }
-
-        if (isHorizontalSheet) {
           const datesLine = lines[dateRowIdx];
           const stepsLine = lines[stepsRowIdx] || [];
           const workoutLine = workoutRowIdx !== -1 ? lines[workoutRowIdx] : [];
           const yogaLine = yogaRowIdx !== -1 ? lines[yogaRowIdx] : [];
 
           for (let col = 1; col < datesLine.length; col++) {
-            const rawDate = datesLine[col];
-            const parsedDate = parseDateStr(rawDate);
+            const parsedDate = parseDateStr(datesLine[col]);
             if (parsedDate) {
               const steps = parseInt(stepsLine[col], 10) || 0;
               const workoutVal = parseFloat(workoutLine[col]) || 0;
@@ -210,24 +230,10 @@ export default function Admin() {
               }
             }
           }
-        } else {
-          // Fallback: Standard line-by-line format (YYYY-MM-DD, steps, workout, yoga)
-          for (const line of lines) {
-            if (line.length >= 2) {
-              const formattedDate = parseDateStr(line[0]);
-              const steps = parseInt(line[1], 10) || 0;
-              const workout = line[2] ? parseInt(line[2], 10) : 0;
-              const yoga = line[3] ? parseInt(line[3], 10) : 0;
-
-              if (formattedDate) {
-                logs.push({ log_date: formattedDate, steps, workout, yoga });
-              }
-            }
-          }
         }
 
         if (logs.length === 0) {
-          setCsvStatus("No logged values found in file for dates.");
+          setCsvStatus("No logged step/workout entries found in file.");
           return;
         }
 
@@ -235,13 +241,13 @@ export default function Admin() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            participant_id: selectedThottie.id,
+            participant_id: targetParticipant.id,
             logs,
           }),
         });
 
         if (res.ok) {
-          setCsvStatus(`Successfully uploaded ${logs.length} daily logs for ${selectedThottie.name}!`);
+          setCsvStatus(`Successfully imported ${logs.length} entries for ${targetParticipant.name}!`);
           setCsvFile(null);
           refetchLogs();
           queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
@@ -352,7 +358,7 @@ export default function Admin() {
           {/* Step 1: Choose Thottie Grid */}
           <div className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-3">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-600">
-              Step 1: Choose Thottie
+              Step 1: Choose Thottie (Optional for CSV)
             </h2>
             <div className="grid grid-cols-2 gap-2">
               {participants.map((p) => (
