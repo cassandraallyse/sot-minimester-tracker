@@ -25,6 +25,7 @@ import {
   Leaf,
   Users,
   Sparkles,
+  Quote,
 } from "lucide-react";
 
 type Group = {
@@ -175,7 +176,7 @@ export default function Leaderboard() {
   const TOTAL_WEEKS = 4;
   const TOTAL_DAYS = 28;
 
-  const dateRangeLabel = "August 10 through September 6, 2026";
+  const dateRangeLabel = "August 10 – September 6, 2026";
 
   const now = new Date();
   const diffInMs = Math.max(0, now.getTime() - semesterStart.getTime());
@@ -191,28 +192,34 @@ export default function Leaderboard() {
 
   return (
     <div className="space-y-6">
-      {/* Upgraded Daily Mantra Card */}
+      {/* Upgraded Mantra Card with Ambient Glow */}
       {mantra && (
-        <div className="relative overflow-hidden rounded-xl border border-accent/25 bg-gradient-to-r from-raised via-slate-900/80 to-raised p-4 text-center shadow-md">
-          <p className="text-[10px] uppercase tracking-widest text-accent font-bold flex items-center justify-center gap-1.5 mb-1">
-            <Sparkles className="size-3 text-accent" /> Daily Mantra <Sparkles className="size-3 text-accent" />
-          </p>
-          <p className="text-sm md:text-base font-medium italic text-primary leading-relaxed">
-            "{mantra}"
-          </p>
+        <div className="relative overflow-hidden rounded-2xl border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-slate-900/90 to-purple-950/40 p-5 text-center shadow-xl shadow-purple-950/20 backdrop-blur-md">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-[11px] font-bold uppercase tracking-widest text-purple-300 mb-2 shadow-inner">
+            <Sparkles className="size-3 text-purple-400 animate-pulse" />
+            <span>Daily Mantra</span>
+            <Sparkles className="size-3 text-purple-400 animate-pulse" />
+          </div>
+          <div className="relative flex items-center justify-center gap-2">
+            <Quote className="size-5 text-purple-500/40 rotate-180 shrink-0 hidden sm:inline" />
+            <p className="text-base sm:text-lg font-semibold italic text-white tracking-wide leading-relaxed">
+              "{mantra}"
+            </p>
+            <Quote className="size-5 text-purple-500/40 shrink-0 hidden sm:inline" />
+          </div>
         </div>
       )}
 
-      {/* Group / Cohort Filter Bar */}
+      {/* Group / Cohort Selector */}
       {!isPrivateGroupView && groups.length > 0 && (
-        <div className="bg-raised border border-border rounded-lg p-3.5 flex items-center justify-between gap-4">
+        <div className="bg-raised border border-border rounded-xl p-3.5 flex items-center justify-between gap-4 shadow-sm">
           <label className="text-xs font-semibold text-secondary flex items-center gap-2 shrink-0">
             <Users className="size-4 text-accent" /> Select Group / Cohort:
           </label>
           <select
             value={selectedGroupId}
             onChange={(e) => setSelectedGroupId(e.target.value)}
-            className="bg-inset border border-border text-primary font-medium rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-accent cursor-pointer max-w-xs w-full"
+            className="bg-inset border border-border text-primary font-medium rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-accent cursor-pointer max-w-xs w-full transition"
           >
             <option value="all">All Groups</option>
             {groups.map((g) => (
@@ -224,23 +231,33 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Hero Header with Polished Typography */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div className="flex-1">
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-primary">
-            {currentGroupObj ? `${currentGroupObj.name} Progress` : "Minimester Progress"}
-          </h1>
-          <p className="text-secondary text-sm font-medium mt-1">
-            Week {weeksElapsed} of {TOTAL_WEEKS} — {dateRangeLabel}
-          </p>
-          <p className="text-xs text-secondary flex items-center gap-1.5 mt-1.5">
-            <Clock className="size-3.5" />
-            Last Updated: <span className="font-mono font-medium text-primary">{formatLastUpdated(lastUpdated)}</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs font-mono font-semibold text-secondary bg-inset px-3 py-1.5 rounded-lg border border-border self-start md:self-auto">
-          <TrendingUp className="size-4 text-accent" />
-          <span>Minimester: <strong className="text-primary">{semesterProgressPct}%</strong> complete</span>
+      {/* Hero Header with Badge Accents */}
+      <div className="space-y-3 pt-1">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+              {currentGroupObj ? `${currentGroupObj.name} Progress` : "Minimester Progress"}
+            </h1>
+            <p className="text-xs text-secondary flex items-center gap-1.5 mt-1.5">
+              <Clock className="size-3.5 text-slate-500" />
+              Last Updated: <span className="font-mono font-medium text-slate-300">{formatLastUpdated(lastUpdated)}</span>
+            </p>
+          </div>
+
+          {/* Timeline Badges */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-slate-300 shadow-sm">
+              <CalendarDays className="size-3.5 text-purple-400" />
+              <span>Week <strong className="text-white font-mono">{weeksElapsed}</strong> of {TOTAL_WEEKS}</span>
+              <span className="text-slate-500">·</span>
+              <span className="text-slate-400">{dateRangeLabel}</span>
+            </span>
+
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 shadow-sm font-mono">
+              <TrendingUp className="size-3.5 text-purple-400" />
+              <span>Minimester: <strong className="text-white font-bold">{semesterProgressPct}%</strong> complete</span>
+            </span>
+          </div>
         </div>
       </div>
 
