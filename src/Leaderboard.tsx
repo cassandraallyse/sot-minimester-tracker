@@ -192,7 +192,7 @@ export default function Leaderboard() {
 
   return (
     <div className="space-y-6">
-      {/* Upgraded Mantra Card with Ambient Glow */}
+      {/* Upgraded Mantra Card */}
       {mantra && (
         <div className="relative overflow-hidden rounded-2xl border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-slate-900/90 to-purple-950/40 p-5 text-center shadow-xl shadow-purple-950/20 backdrop-blur-md">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-[11px] font-bold uppercase tracking-widest text-purple-300 mb-2 shadow-inner">
@@ -202,8 +202,8 @@ export default function Leaderboard() {
           </div>
           <div className="relative flex items-center justify-center gap-2">
             <Quote className="size-5 text-purple-500/40 rotate-180 shrink-0 hidden sm:inline" />
-            <p className="text-base sm:text-lg font-semibold italic text-white tracking-wide leading-relaxed">
-              "{mantra}"
+            <p className="text-base sm:text-lg font-medium italic text-white tracking-wide leading-relaxed">
+              {mantra}
             </p>
             <Quote className="size-5 text-purple-500/40 shrink-0 hidden sm:inline" />
           </div>
@@ -231,33 +231,31 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Hero Header with Badge Accents */}
-      <div className="space-y-3 pt-1">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-              {currentGroupObj ? `${currentGroupObj.name} Progress` : "Minimester Progress"}
-            </h1>
-            <p className="text-xs text-secondary flex items-center gap-1.5 mt-1.5">
-              <Clock className="size-3.5 text-slate-500" />
-              Last Updated: <span className="font-mono font-medium text-slate-300">{formatLastUpdated(lastUpdated)}</span>
-            </p>
-          </div>
+      {/* Hero Header with Stacked Badges */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-1">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+            {currentGroupObj ? `${currentGroupObj.name} Progress` : "Minimester Progress"}
+          </h1>
+          <p className="text-xs text-secondary flex items-center gap-1.5 mt-1.5">
+            <Clock className="size-3.5 text-slate-500" />
+            Last Updated: <span className="font-medium text-slate-300">{formatLastUpdated(lastUpdated)}</span>
+          </p>
+        </div>
 
-          {/* Timeline Badges */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-slate-300 shadow-sm">
-              <CalendarDays className="size-3.5 text-purple-400" />
-              <span>Week <strong className="text-white font-mono">{weeksElapsed}</strong> of {TOTAL_WEEKS}</span>
-              <span className="text-slate-500">·</span>
-              <span className="text-slate-400">{dateRangeLabel}</span>
-            </span>
+        {/* Stacked Timeline Badges */}
+        <div className="flex flex-col items-start md:items-end gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-slate-300 shadow-sm">
+            <CalendarDays className="size-3.5 text-purple-400" />
+            <span>Week <strong className="text-white">{weeksElapsed}</strong> of {TOTAL_WEEKS}</span>
+            <span className="text-slate-500">·</span>
+            <span className="text-slate-400">{dateRangeLabel}</span>
+          </span>
 
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 shadow-sm font-mono">
-              <TrendingUp className="size-3.5 text-purple-400" />
-              <span>Minimester: <strong className="text-white font-bold">{semesterProgressPct}%</strong> complete</span>
-            </span>
-          </div>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 shadow-sm">
+            <TrendingUp className="size-3.5 text-purple-400" />
+            <span>Minimester: <strong className="text-white font-bold">{semesterProgressPct}%</strong> complete</span>
+          </span>
         </div>
       </div>
 
@@ -291,7 +289,7 @@ export default function Leaderboard() {
                     )}
                     <div>
                       <h2 className="text-base font-semibold">{p.name}</h2>
-                      <p className="text-xs text-secondary">{p.location}</p>
+                      {p.location && <p className="text-xs text-secondary">{p.location}</p>}
                     </div>
                   </div>
                 </div>
