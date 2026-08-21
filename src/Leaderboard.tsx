@@ -171,7 +171,7 @@ export default function Leaderboard() {
   const currentGroupObj = groups.find((g) => String(g.id) === selectedGroupId);
 
   // Locked 4-Week Minimester Dates: Aug 10, 2026 to Sept 6, 2026
-  const semesterStart = new Date(2026, 7, 10); // Aug 10
+  const semesterStart = new Date(2026, 7, 10);
   const TOTAL_WEEKS = 4;
   const TOTAL_DAYS = 28;
 
@@ -191,13 +191,13 @@ export default function Leaderboard() {
 
   return (
     <div className="space-y-6">
-      {/* Daily Mantra Banner */}
+      {/* Upgraded Daily Mantra Card */}
       {mantra && (
-        <div className="bg-raised border border-accent/30 rounded-lg p-3.5 text-center shadow-sm flex flex-col items-center justify-center gap-1">
-          <p className="text-[10px] uppercase tracking-widest text-accent font-bold flex items-center gap-1">
-            <Sparkles className="size-3" /> Daily Mantra <Sparkles className="size-3" />
+        <div className="relative overflow-hidden rounded-xl border border-accent/25 bg-gradient-to-r from-raised via-slate-900/80 to-raised p-4 text-center shadow-md">
+          <p className="text-[10px] uppercase tracking-widest text-accent font-bold flex items-center justify-center gap-1.5 mb-1">
+            <Sparkles className="size-3 text-accent" /> Daily Mantra <Sparkles className="size-3 text-accent" />
           </p>
-          <p className="text-sm font-semibold italic text-primary">
+          <p className="text-sm md:text-base font-medium italic text-primary leading-relaxed">
             "{mantra}"
           </p>
         </div>
@@ -224,23 +224,23 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end gap-4">
+      {/* Hero Header with Polished Typography */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div className="flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-primary">
             {currentGroupObj ? `${currentGroupObj.name} Progress` : "Minimester Progress"}
           </h1>
-          <p className="text-secondary text-sm mt-1">
+          <p className="text-secondary text-sm font-medium mt-1">
             Week {weeksElapsed} of {TOTAL_WEEKS} — {dateRangeLabel}
           </p>
           <p className="text-xs text-secondary flex items-center gap-1.5 mt-1.5">
             <Clock className="size-3.5" />
-            Last Updated: <span className="font-medium text-primary">{formatLastUpdated(lastUpdated)}</span>
+            Last Updated: <span className="font-mono font-medium text-primary">{formatLastUpdated(lastUpdated)}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-secondary">
-          <TrendingUp className="size-4" />
-          <span>Minimester: {semesterProgressPct}% complete</span>
+        <div className="flex items-center gap-2 text-xs font-mono font-semibold text-secondary bg-inset px-3 py-1.5 rounded-lg border border-border self-start md:self-auto">
+          <TrendingUp className="size-4 text-accent" />
+          <span>Minimester: <strong className="text-primary">{semesterProgressPct}%</strong> complete</span>
         </div>
       </div>
 
