@@ -1,16 +1,30 @@
+function formatDate(dateStr: string): string {
+  if (!dateStr) return "";
+  const cleanStr = dateStr.split("T")[0];
+  const [year, month, day] = cleanStr.split("-").map(Number);
+  
+  if (!year || !month || !day) return dateStr;
+  
+  const date = new Date(year, month - 1, day);
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 import React, { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Progress } from "../components/Progress";
 import {
   Footprints,
   Dumbbell,
+  Award,
+  TrendingUp,
+  CalendarDays,
   Clock,
   Leaf,
   Users,
   Sparkles,
-  CalendarDays,
-  Target,
-  CheckCircle2,
 } from "lucide-react";
 
 type Group = {
@@ -44,6 +58,14 @@ type LeaderboardResponse = {
 const WEEK_STEPS_GOAL = 70000;
 const WEEK_WORKOUTS_GOAL = 3;
 
+const MEDALS = ["🥇", "🥈", "🥉"];
+const RANK_LABELS = [
+  { min: 80, label: "On Fire 🔥", color: "text-success" },
+  { min: 50, label: "Crushing It 💪", color: "text-accent" },
+  { min: 25, label: "In Progress 📈", color: "text-warning" },
+  { min: 0, label: "Just Getting Started 🌱", color: "text-secondary" },
+];
+
 const MANTRAS = [
   "Miracles are happening!",
   "Things are happening *for* me, not to me.",
@@ -55,37 +77,22 @@ const MANTRAS = [
   "Things are always working out for my highest good.",
 ];
 
-function getPaceBadge(p: Participant, expectedPct: number) {
-  const avgPct = (p.steps_pct + p.workouts_pct) / 2;
-  const weekComplete =
-    p.week_steps >= WEEK_STEPS_GOAL && p.week_workouts >= WEEK_WORKOUTS_GOAL;
+function getRankLabel(pct: number) {
+  return RANK_LABELS.find((r) => pct >= r.min) ?? RANK_LABELS[3];
+}
 
-  if (weekComplete) {
-    return {
-      label: "Weekly Target Hit ⚡",
-      classes: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-    };
-  }
-  if (avgPct >= expectedPct + 10) {
-    return {
-      label: "Crushing Pace 🔥",
-      classes: "bg-purple-500/10 text-purple-400 border-purple-500/30",
-    };
-  }
-  if (avgPct >= expectedPct - 5) {
-    return {
-      label: "On Track 🎯",
-      classes: "bg-sky-500/10 text-sky-400 border-sky-500/30",
-    };
-  }
-  return {
-    label: "Steady Progress 🌱",
-    classes: "bg-slate-800 text-slate-300 border-slate-700",
-  };
+function getProgressVariant(
+  pct: number,
+): "success" | "warning" | "error" | "default" {
+  if (pct >= 80) return "success";
+  if (pct >= 40) return "default";
+  if (pct >= 15) return "warning";
+  return "error";
 }
 
 function formatSteps(n: number) {
-  return Number(n || 0).toLocaleString();
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }
 
 function formatLastUpdated(ts: string | null): string {
@@ -142,72 +149,72 @@ export default function Leaderboard() {
   if (isLoading) {
     return (
       <div className="space-y-4 mt-4">
-        <div className="h-8 bg-slate-900 rounded-md animate-pulse w-48" />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-56 bg-slate-900 rounded-xl animate-pulse" />
-          ))}
-        </div>
+        <div className="h-8 bg-inset rounded-md animate-pulse w-48" />
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="h-40 bg-inset rounded-lg animate-pulse" />
+        ))}
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-xl border border-red-500/30 bg-red-950/20 p-4 text-sm text-red-400 mt-4">
-        Failed to load tracker. Please refresh.
+      <div className="rounded-md border border-error bg-error-weak p-4 text-sm text-error mt-4">
+        Failed to load leaderboard. Please refresh.
       </div>
     );
   }
 
-  const rawParticipants: Participant[] = Array.isArray(data) ? data : data?.rows || [];
+  const participants: Participant[] = Array.isArray(data) ? data : data?.rows || [];
   const lastUpdated: string | null = Array.isArray(data) ? null : data?.lastUpdated || null;
-
-  // Alphabetical sorting to keep focus on personal growth
-  const participants = [...rawParticipants].sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
 
   const currentGroupObj = groups.find((g) => String(g.id) === selectedGroupId);
 
-  // Minimester Timeline: Aug 10, 2026 to Sept 6, 2026 (28 Days)
-  const semesterStart = new Date(2026, 7, 10);
+  // Locked 4-Week Minimester Dates: Aug 10, 2026 to Sept 6, 2026
+  const semesterStart = new Date(2026, 7, 10); // Aug 10
   const TOTAL_WEEKS = 4;
   const TOTAL_DAYS = 28;
+
+  const dateRangeLabel = "August 10 through September 6, 2026";
 
   const now = new Date();
   const diffInMs = Math.max(0, now.getTime() - semesterStart.getTime());
   const daysElapsed = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
 
-  const weeksElapsed = Math.min(TOTAL_WEEKS, Math.max(1, Math.floor(daysElapsed / 7) + 1));
-  const semesterProgressPct = Math.min(100, Math.max(0, Math.round((daysElapsed / TOTAL_DAYS) * 100)));
+  let weeksElapsed = Math.min(TOTAL_WEEKS, Math.max(1, Math.floor(daysElapsed / 7) + 1));
+  let semesterProgressPct = Math.min(100, Math.max(0, Math.round((daysElapsed / TOTAL_DAYS) * 100)));
+
+  if (daysElapsed >= TOTAL_DAYS) {
+    weeksElapsed = 4;
+    semesterProgressPct = 100;
+  }
 
   return (
-    <div className="space-y-6 text-slate-100">
+    <div className="space-y-6">
       {/* Daily Mantra Banner */}
       {mantra && (
-        <div className="relative overflow-hidden rounded-xl border border-purple-500/20 bg-gradient-to-r from-purple-950/30 via-slate-900/60 to-purple-950/30 p-4 text-center shadow-lg backdrop-blur-sm">
-          <p className="text-[10px] uppercase tracking-widest text-purple-400 font-bold flex items-center justify-center gap-1.5 mb-1">
+        <div className="bg-raised border border-accent/30 rounded-lg p-3.5 text-center shadow-sm flex flex-col items-center justify-center gap-1">
+          <p className="text-[10px] uppercase tracking-widest text-accent font-bold flex items-center gap-1">
             <Sparkles className="size-3" /> Daily Mantra <Sparkles className="size-3" />
           </p>
-          <p className="text-sm md:text-base font-medium italic text-slate-200">
+          <p className="text-sm font-semibold italic text-primary">
             "{mantra}"
           </p>
         </div>
       )}
 
-      {/* Cohort Selector */}
+      {/* Group / Cohort Filter Bar */}
       {!isPrivateGroupView && groups.length > 0 && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3.5 flex items-center justify-between gap-4 backdrop-blur-sm">
-          <label className="text-xs font-semibold text-slate-400 flex items-center gap-2 shrink-0">
-            <Users className="size-4 text-purple-400" /> Cohort:
+        <div className="bg-raised border border-border rounded-lg p-3.5 flex items-center justify-between gap-4">
+          <label className="text-xs font-semibold text-secondary flex items-center gap-2 shrink-0">
+            <Users className="size-4 text-accent" /> Select Group / Cohort:
           </label>
           <select
             value={selectedGroupId}
             onChange={(e) => setSelectedGroupId(e.target.value)}
-            className="bg-slate-950 border border-slate-700 text-slate-200 font-medium rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-purple-500 cursor-pointer max-w-xs w-full transition"
+            className="bg-inset border border-border text-primary font-medium rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-accent cursor-pointer max-w-xs w-full"
           >
-            <option value="all">All Participants</option>
+            <option value="all">All Groups</option>
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
@@ -217,163 +224,206 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Header Info */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-2 border-b border-slate-800/80">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            {currentGroupObj ? `${currentGroupObj.name} Dashboard` : "Minimester Dashboard"}
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-end gap-4">
+        <div className="flex-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {currentGroupObj ? `${currentGroupObj.name} Progress` : "Minimester Progress"}
           </h1>
-          <p className="text-slate-400 text-xs mt-1">
-            Week {weeksElapsed} of {TOTAL_WEEKS} · August 10 through September 6, 2026
+          <p className="text-secondary text-sm mt-1">
+            Week {weeksElapsed} of {TOTAL_WEEKS} — {dateRangeLabel}
           </p>
-          <p className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-1.5">
-            <Clock className="size-3" />
-            Last Updated: <span className="font-medium text-slate-300">{formatLastUpdated(lastUpdated)}</span>
+          <p className="text-xs text-secondary flex items-center gap-1.5 mt-1.5">
+            <Clock className="size-3.5" />
+            Last Updated: <span className="font-medium text-primary">{formatLastUpdated(lastUpdated)}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 self-start md:self-auto">
-          <Target className="size-3.5 text-purple-400" />
-          <span>Timeline: <strong className="text-white">{semesterProgressPct}%</strong> Elapsed</span>
+        <div className="flex items-center gap-2 text-sm text-secondary">
+          <TrendingUp className="size-4" />
+          <span>Minimester: {semesterProgressPct}% complete</span>
         </div>
       </div>
 
-      {/* Modern Participant Cards Grid */}
+      {/* Semester progress rail */}
+      <div className="space-y-1.5">
+        <Progress value={semesterProgressPct} aria-label="Minimester progress" />
+      </div>
+
+      {/* Player cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {participants.map((p) => {
-          const badge = getPaceBadge(p, semesterProgressPct);
+        {participants.map((p, idx) => {
+          const rank = getRankLabel(p.steps_pct);
+          const medal = MEDALS[idx] ?? null;
           const stepsLeft = Math.max(0, p.steps_goal - p.steps_total);
           const workoutsLeft = Math.max(0, p.workouts_goal - p.workouts_total);
-          const overallCompletion = ((p.steps_pct + p.workouts_pct) / 2).toFixed(1);
 
           return (
             <div
               key={p.id}
-              className="group relative rounded-2xl border border-slate-800/90 bg-slate-900/60 p-5 space-y-4 hover:border-slate-700 transition duration-200 shadow-md backdrop-blur-sm"
+              className="bg-raised border border-border rounded-lg p-5 space-y-4"
             >
-              {/* Card Header */}
-              <div className="flex items-start justify-between gap-2">
+              {/* Name + rank */}
+              <div className="flex items-start justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-bold text-white tracking-tight">
-                      {p.name}
-                    </h2>
-                    {p.location && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700/60">
-                        {p.location}
+                    {medal && <span className="text-2xl">{medal}</span>}
+                    {!medal && idx < 6 && (
+                      <span className="text-lg font-bold text-secondary">
+                        #{idx + 1}
                       </span>
                     )}
+                    <div>
+                      <h2 className="text-base font-semibold">{p.name}</h2>
+                      <p className="text-xs text-secondary">{p.location}</p>
+                    </div>
                   </div>
                 </div>
-                <span
-                  className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${badge.classes}`}
-                >
-                  {badge.label}
+                <span className={`text-xs font-medium ${rank.color}`}>
+                  {rank.label}
                 </span>
               </div>
 
-              {/* Primary Goals Section */}
-              <div className="space-y-3.5">
-                {/* Steps */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 text-slate-300 font-medium">
-                      <Footprints className="size-3.5 text-purple-400" /> Steps Goal
+              {/* Steps */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5 text-secondary">
+                    <Footprints className="size-3.5" />
+                    Steps
+                  </span>
+                  <span className="font-semibold">
+                    {formatSteps(p.steps_total)}
+                    <span className="text-secondary font-normal text-xs">
+                      /{formatSteps(p.steps_goal)}
                     </span>
-                    <span className="font-mono text-slate-200 font-semibold">
-                      {formatSteps(p.steps_total)}{" "}
-                      <span className="text-slate-500 font-normal">
-                        / {formatSteps(p.steps_goal)}
-                      </span>
-                    </span>
-                  </div>
-                  <Progress
-                    value={Math.min(100, p.steps_pct)}
-                    variant="default"
-                    aria-label={`${p.name} steps`}
-                  />
-                  <div className="flex justify-between text-[11px] text-slate-500 font-mono">
-                    <span>{p.steps_pct.toFixed(1)}% complete</span>
-                    <span>{stepsLeft > 0 ? `${formatSteps(stepsLeft)} to go` : "Goal reached! 🎉"}</span>
-                  </div>
+                  </span>
                 </div>
+                <Progress
+                  value={Math.min(100, p.steps_pct)}
+                  variant={getProgressVariant(p.steps_pct)}
+                  aria-label={`${p.name} steps progress`}
+                />
+                <p className="text-xs text-secondary">
+                  {p.steps_pct.toFixed(1)}% complete
+                  {stepsLeft > 0 && ` · ${formatSteps(stepsLeft)} to go`}
+                </p>
+              </div>
 
-                {/* Workouts */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 text-slate-300 font-medium">
-                      <Dumbbell className="size-3.5 text-sky-400" /> Workouts Goal
+              {/* Workouts */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5 text-secondary">
+                    <Dumbbell className="size-3.5" />
+                    Workouts
+                  </span>
+                  <span className="font-semibold">
+                    {p.workouts_total}
+                    <span className="text-secondary font-normal text-xs">
+                      /{p.workouts_goal} required
                     </span>
-                    <span className="font-mono text-slate-200 font-semibold">
-                      {p.workouts_total}{" "}
-                      <span className="text-slate-500 font-normal">
-                        / {p.workouts_goal} sessions
+                  </span>
+                </div>
+                <Progress
+                  value={Math.min(100, p.workouts_pct)}
+                  variant={getProgressVariant(p.workouts_pct)}
+                  aria-label={`${p.name} workouts progress`}
+                />
+                <p className="text-xs text-secondary">
+                  {p.workouts_pct.toFixed(1)}% complete
+                  {workoutsLeft > 0 && ` · ${workoutsLeft} sessions to go`}
+                </p>
+              </div>
+
+              {/* This week */}
+              <div className="rounded-md bg-inset p-3 space-y-2">
+                <p className="text-xs font-medium text-secondary flex items-center gap-1.5">
+                  <CalendarDays className="size-3.5" /> This week
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-secondary">Steps</span>
+                      <span
+                        className={`font-semibold ${
+                          p.week_steps >= WEEK_STEPS_GOAL
+                            ? "text-success"
+                            : "text-primary"
+                        }`}
+                      >
+                        {formatSteps(p.week_steps)}
+                        <span className="text-secondary font-normal">
+                          /{formatSteps(WEEK_STEPS_GOAL)}
+                        </span>
                       </span>
-                    </span>
+                    </div>
+                    <Progress
+                      value={Math.min(
+                        100,
+                        Math.round((p.week_steps / WEEK_STEPS_GOAL) * 100),
+                      )}
+                      variant={
+                        p.week_steps >= WEEK_STEPS_GOAL
+                          ? "success"
+                          : p.week_steps >= WEEK_STEPS_GOAL * 0.5
+                            ? "default"
+                            : "warning"
+                      }
+                      aria-label={`${p.name} this week steps`}
+                    />
                   </div>
-                  <Progress
-                    value={Math.min(100, p.workouts_pct)}
-                    variant="default"
-                    aria-label={`${p.name} workouts`}
-                  />
-                  <div className="flex justify-between text-[11px] text-slate-500 font-mono">
-                    <span>{p.workouts_pct.toFixed(1)}% complete</span>
-                    <span>{workoutsLeft > 0 ? `${workoutsLeft} remaining` : "Goal reached! ⚡"}</span>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-secondary">Workouts</span>
+                      <span
+                        className={`font-semibold ${
+                          p.week_workouts >= WEEK_WORKOUTS_GOAL
+                            ? "text-success"
+                            : "text-primary"
+                        }`}
+                      >
+                        {p.week_workouts}
+                        <span className="text-secondary font-normal">
+                          /{WEEK_WORKOUTS_GOAL}
+                        </span>
+                      </span>
+                    </div>
+                    <Progress
+                      value={Math.min(
+                        100,
+                        Math.round(
+                          (p.week_workouts / WEEK_WORKOUTS_GOAL) * 100,
+                        ),
+                      )}
+                      variant={
+                        p.week_workouts >= WEEK_WORKOUTS_GOAL
+                          ? "success"
+                          : p.week_workouts >= 1
+                            ? "default"
+                            : "warning"
+                      }
+                      aria-label={`${p.name} this week workouts`}
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Weekly Momentum Sub-Panel */}
-              <div className="rounded-xl bg-slate-950/70 border border-slate-800/80 p-3 space-y-2">
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
-                  <span className="flex items-center gap-1.5">
-                    <CalendarDays className="size-3 text-purple-400" /> This Week's Pace
-                  </span>
-                  {(p.week_steps >= WEEK_STEPS_GOAL || p.week_workouts >= WEEK_WORKOUTS_GOAL) && (
-                    <span className="text-emerald-400 flex items-center gap-1 text-[10px] font-semibold">
-                      <CheckCircle2 className="size-3" /> Target hit
+              {/* Overall score bubble */}
+              <div className="flex items-center justify-between pt-1 border-t border-border-weak">
+                <span className="text-xs text-secondary flex items-center gap-1">
+                  <Award className="size-3.5" />
+                  Minimester total
+                </span>
+                <div className="flex items-center gap-3">
+                  {p.yoga_total > 0 && (
+                    <span className="text-xs text-success flex items-center gap-1 font-medium bg-success-weak px-2 py-0.5 rounded">
+                      <Leaf className="size-3" /> {p.yoga_total} Yoga
                     </span>
                   )}
-                </div>
-                <div className="grid grid-cols-2 gap-3 font-mono text-xs">
                   <div>
-                    <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-                      <span>Steps</span>
-                      <span>{formatSteps(p.week_steps)} / 70k</span>
-                    </div>
-                    <Progress
-                      value={Math.min(100, Math.round((p.week_steps / WEEK_STEPS_GOAL) * 100))}
-                      variant={p.week_steps >= WEEK_STEPS_GOAL ? "success" : "default"}
-                    />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-                      <span>Workouts</span>
-                      <span>{p.week_workouts} / 3</span>
-                    </div>
-                    <Progress
-                      value={Math.min(100, Math.round((p.week_workouts / WEEK_WORKOUTS_GOAL) * 100))}
-                      variant={p.week_workouts >= WEEK_WORKOUTS_GOAL ? "success" : "default"}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Card Footer: Yoga & Personal Score */}
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs">
-                <div>
-                  {p.yoga_total > 0 ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
-                      <Leaf className="size-3" /> {p.yoga_total} Yoga {p.yoga_total === 1 ? "session" : "sessions"}
+                    <span className="text-sm font-bold text-accent">
+                      {((p.steps_pct + p.workouts_pct) / 2).toFixed(1)}%
                     </span>
-                  ) : (
-                    <span className="text-[11px] text-slate-500 italic">Self-paced journey</span>
-                  )}
-                </div>
-                <div className="text-right">
-                  <span className="text-sm font-bold font-mono text-purple-400">
-                    {overallCompletion}%
-                  </span>
-                  <span className="text-[11px] text-slate-500 ml-1.5 font-sans">complete</span>
+                    <span className="text-xs text-secondary ml-1">overall</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -382,9 +432,9 @@ export default function Leaderboard() {
       </div>
 
       {participants.length === 0 && (
-        <div className="text-center py-16 text-slate-400 bg-slate-900/40 border border-slate-800 rounded-2xl">
-          <p className="text-sm">
-            No participants found in this view.
+        <div className="text-center py-16 text-secondary bg-raised border border-border rounded-lg">
+          <p className="text-base">
+            No Thotties found in this group — add some or pick another group!
           </p>
         </div>
       )}
