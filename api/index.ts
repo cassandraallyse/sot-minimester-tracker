@@ -12,7 +12,7 @@ function getDb() {
   return neon(dbUrl);
 }
 
-// Helpers for Spreadsheet Parsing (robust against raw numbers and strings)
+// Helpers for Spreadsheet Parsing (always logs the date so clearing a cell sets it to 0)
 function extractMatrixLogs(
   rowTypes: Record<string, any[]>,
   dateColIndices: { idx: number; isoDate: string }[]
@@ -36,9 +36,8 @@ function extractMatrixLogs(
     if (yRaw === "y" || yRaw === "true") yNum = 1;
     else yNum = parseInt(yRaw, 10) || 0;
 
-    if (stepsNum > 0 || wNum > 0 || yNum > 0) {
-      logs.push({ log_date: isoDate, steps: stepsNum, workout: wNum, yoga: yNum });
-    }
+    // Always push the record so zeroed/cleared values overwrite the database
+    logs.push({ log_date: isoDate, steps: stepsNum, workout: wNum, yoga: yNum });
   }
   return logs;
 }
