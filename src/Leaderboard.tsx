@@ -13,7 +13,6 @@ import {
   Quote,
 } from "lucide-react";
 
-// Self-contained progress bar to avoid import path issues
 function ProgressBar({
   value,
   variant = "default",
@@ -197,16 +196,35 @@ export default function Leaderboard() {
   const rawParticipants: Participant[] = Array.isArray(data) ? data : data?.rows || [];
   const lastUpdated: string | null = Array.isArray(data) ? null : data?.lastUpdated || null;
 
-  // Sort by composite score (50% steps, 50% workouts)
+  // Balanced completionist sort:
+  // Requires both steps and workouts to progress together.
   const participants = [...rawParticipants].sort((a, b) => {
-    const scoreA = (a.steps_pct + a.workouts_pct) / 2;
-    const scoreB = (b.steps_pct + b.workouts_pct) / 2;
-    return scoreB - scoreA;
+    const cappedStepsA = Math.min(100, a.steps_pct);
+    const cappedWorkoutsA = Math.min(100, a.workouts_pct);
+    const balanceScoreA = (cappedStepsA + cappedWorkoutsA) / 2;
+
+    const cappedStepsB = Math.min(100, b.steps_pct);
+    const cappedWorkoutsB = Math.min(100, b.workouts_pct);
+    const balanceScoreB = (cappedStepsB + cappedWorkoutsB) / 2;
+
+    // 1. Primary sort: Balanced completion towards the 100% finish line
+    if (balanceScoreB !== balanceScoreA) {
+      return balanceScoreB - balanceScoreA;
+    }
+
+    // 2. Secondary tiebreaker: Total composite including uncapped overage
+    const totalA = (a.steps_pct + a.workouts_pct) / 2;
+    const totalB = (b.steps_pct + b.workouts_pct) / 2;
+    if (totalB !== totalA) {
+      return totalB - totalA;
+    }
+
+    // 3. Final tiebreaker: Strength training sessions completed
+    return b.workouts_total - a.workouts_total;
   });
 
   const currentGroupObj = groups.find((g) => String(g.id) === selectedGroupId);
 
-  // 6-Week Minimester: Nov 16 to Dec 27, 2026 (Month 10 = Nov in 0-indexed JS)
   const semesterStart = new Date(2026, 10, 16);
   const TOTAL_WEEKS = 6;
   const TOTAL_DAYS = 42;
@@ -226,7 +244,6 @@ export default function Leaderboard() {
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto px-4 py-6 text-slate-100">
-      {/* Daily Mantra */}
       {mantra && (
         <div className="relative overflow-hidden rounded-2xl border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-slate-900/90 to-purple-950/40 p-5 text-center shadow-xl shadow-purple-950/20 backdrop-blur-md">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-[11px] font-bold uppercase tracking-widest text-purple-300 mb-2">
@@ -244,7 +261,6 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Cohort Selector */}
       {!isPrivateGroupView && groups.length > 0 && (
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between gap-4 shadow-sm">
           <label className="text-xs font-semibold text-slate-300 flex items-center gap-2 shrink-0">
@@ -263,7 +279,6 @@ export default function Leaderboard() {
         </div>
       )}
 
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-1">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
@@ -294,7 +309,6 @@ export default function Leaderboard() {
         <ProgressBar value={semesterProgressPct} aria-label="Minimester progress" />
       </div>
 
-      {/* Leaderboard Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {participants.map((p, idx) => {
           const compositePct = (p.steps_pct + p.workouts_pct) / 2;
@@ -324,7 +338,6 @@ export default function Leaderboard() {
                 </span>
               </div>
 
-              {/* Steps */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-1.5 text-slate-400">
@@ -348,7 +361,6 @@ export default function Leaderboard() {
                 </p>
               </div>
 
-              {/* Workouts */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-1.5 text-slate-400">
@@ -372,7 +384,6 @@ export default function Leaderboard() {
                 </p>
               </div>
 
-              {/* Weekly Tracker */}
               <div className="rounded-lg bg-slate-950/60 border border-slate-800/80 p-3 space-y-2">
                 <p className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
                   <CalendarDays className="size-3.5 text-purple-400" /> This week
@@ -407,7 +418,6 @@ export default function Leaderboard() {
                 </div>
               </div>
 
-              {/* Score Footer */}
               <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
                 <span className="text-xs text-slate-400 flex items-center gap-1">
                   <Award className="size-3.5 text-amber-400" /> Minimester Total
