@@ -12,9 +12,9 @@ function getDb() {
   return neon(dbUrl);
 }
 
-// Helpers for Spreadsheet Parsing (matching Admin.tsx logic)
+// Helpers for Spreadsheet Parsing (robust against raw numbers and strings)
 function extractMatrixLogs(
-  rowTypes: Record<string, string[]>,
+  rowTypes: Record<string, any[]>,
   dateColIndices: { idx: number; isoDate: string }[]
 ) {
   const stepsRow = rowTypes["Steps"] || [];
@@ -23,9 +23,9 @@ function extractMatrixLogs(
   const logs = [];
 
   for (const { idx, isoDate } of dateColIndices) {
-    const sRaw = (stepsRow[idx] || "0").replace(/,/g, "");
-    const wRaw = (workoutRow[idx] || "0").trim().toLowerCase();
-    const yRaw = (yogaRow[idx] || "0").trim().toLowerCase();
+    const sRaw = String(stepsRow[idx] ?? "0").replace(/,/g, "").trim();
+    const wRaw = String(workoutRow[idx] ?? "0").trim().toLowerCase();
+    const yRaw = String(yogaRow[idx] ?? "0").trim().toLowerCase();
 
     const stepsNum = parseInt(sRaw, 10) || 0;
     let wNum = 0;
@@ -351,7 +351,7 @@ app.post("/app-api/logs/bulk", async (c) => {
   }
 });
 
-// POST /app-api/sync-sheet (Automated Google Sheet Ingestion)
+// POST /app-api/sync-sheet (Automated Google Sheet Ingestion with Diagnostics)
 app.post("/app-api/sync-sheet", async (c) => {
   try {
     const authHeader = c.req.header("Authorization");
@@ -371,42 +371,41 @@ app.post("/app-api/sync-sheet", async (c) => {
     const sql = getDb();
     const participants = await sql`SELECT id, name FROM sot_participants`;
 
-    // 1. Locate date columns in header row (supports raw ISO dates, "11/2/2026", and "Mon 11/2/2026")
+    // 1. Locate date columns in header row
     const headerCols: any[] = rows[0] || [];
-    const dateColIndices: { idx: number; isoDate: string }[] = [];
+    const dateColIndices: { idx: number; isoDate: string; header: string }[] = [];
 
     headerCols.forEach((col, idx) => {
       const colStr = String(col ?? "").trim();
       
-      // Match M/D/YYYY anywhere in the cell (e.g. "Mon 11/2/2026" or "11/2/2026")
       const slashMatch = colStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       if (slashMatch) {
         const m = slashMatch[1].padStart(2, "0");
         const d = slashMatch[2].padStart(2, "0");
         const y = slashMatch[3];
-        dateColIndices.push({ idx, isoDate: `${y}-${m}-${d}` });
+        dateColIndices.push({ idx, isoDate: `${y}-${m}-${d}`, header: colStr });
         return;
       }
 
-      // Check if Apps Script serialized it as an ISO Date string (e.g. "2026-11-02T...")
       const isoMatch = colStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
       if (isoMatch) {
-        dateColIndices.push({ idx, isoDate: `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}` });
+        dateColIndices.push({ idx, isoDate: `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`, header: colStr });
       }
     });
 
     if (dateColIndices.length === 0) {
-      return c.json({ error: "No date columns matching M/D/YYYY found in sheet header" }, 400);
+      return c.json({ error: "No date columns found in header" }, 400);
     }
 
     // 2. Parse matrix sheet rows into participant logs
     let currentParticipantId: number | null = null;
-    let rowTypes: Record<string, string[]> = {};
+    let currentParticipantName: string | null = null;
+    let rowTypes: Record<string, any[]> = {};
     const bulkPayloads: { participant_id: number; logs: any[] }[] = [];
 
     for (let i = 1; i < rows.length; i++) {
-      const parts: string[] = (rows[i] || []).map((val: any) => String(val ?? "").trim());
-      const firstCol = parts[0];
+      const parts: any[] = rows[i] || [];
+      const firstCol = String(parts[0] ?? "").trim();
       if (!firstCol) continue;
 
       if (["Steps", "Workout", "Yoga"].includes(firstCol)) {
@@ -430,6 +429,7 @@ app.post("/app-api/sync-sheet", async (c) => {
         });
 
         currentParticipantId = matchP ? matchP.id : null;
+        currentParticipantName = matchP ? matchP.name : null;
         rowTypes = {};
       }
     }
@@ -457,10 +457,24 @@ app.post("/app-api/sync-sheet", async (c) => {
       }
     }
 
+    // Diagnostic payload to inspect Jessica's exact parsed logs
+    const jessicaPayload = bulkPayloads.find(p => {
+      const pData = participants.find((pt: any) => pt.id === p.participant_id);
+      return pData?.name?.toLowerCase().includes("jessica");
+    });
+
+    const datesFound = dateColIndices.map(d => d.isoDate);
+
     return c.json({
       success: true,
       participantsSynced: bulkPayloads.length,
       totalEntriesSynced: totalEntries,
+      diagnostics: {
+        lastThreeDatesDetected: datesFound.slice(-3),
+        totalDatesDetected: datesFound.length,
+        jessicaLogsCount: jessicaPayload ? jessicaPayload.logs.length : 0,
+        jessicaLastThreeLogs: jessicaPayload ? jessicaPayload.logs.slice(-3) : null
+      }
     });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
