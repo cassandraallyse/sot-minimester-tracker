@@ -12,6 +12,37 @@ function getDb() {
   return neon(dbUrl);
 }
 
+// Helpers for Spreadsheet Parsing (matching Admin.tsx logic)
+function extractMatrixLogs(
+  rowTypes: Record<string, string[]>,
+  dateColIndices: { idx: number; isoDate: string }[]
+) {
+  const stepsRow = rowTypes["Steps"] || [];
+  const workoutRow = rowTypes["Workout"] || [];
+  const yogaRow = rowTypes["Yoga"] || [];
+  const logs = [];
+
+  for (const { idx, isoDate } of dateColIndices) {
+    const sRaw = (stepsRow[idx] || "0").replace(/,/g, "");
+    const wRaw = (workoutRow[idx] || "0").trim().toLowerCase();
+    const yRaw = (yogaRow[idx] || "0").trim().toLowerCase();
+
+    const stepsNum = parseInt(sRaw, 10) || 0;
+    let wNum = 0;
+    if (wRaw === "y" || wRaw === "true") wNum = 1;
+    else wNum = parseInt(wRaw, 10) || 0;
+
+    let yNum = 0;
+    if (yRaw === "y" || yRaw === "true") yNum = 1;
+    else yNum = parseInt(yRaw, 10) || 0;
+
+    if (stepsNum > 0 || wNum > 0 || yNum > 0) {
+      logs.push({ log_date: isoDate, steps: stepsNum, workout: wNum, yoga: yNum });
+    }
+  }
+  return logs;
+}
+
 // POST /app-api/verify-passcode — Hardcoded fallback for "2026"
 app.post("/app-api/verify-passcode", async (c) => {
   try {
@@ -315,6 +346,113 @@ app.post("/app-api/logs/bulk", async (c) => {
     }
 
     return c.json({ success: true, count: logs.length });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// POST /app-api/sync-sheet (Automated Google Sheet Ingestion)
+app.post("/app-api/sync-sheet", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization");
+    const syncSecret = process.env.SHEET_SYNC_SECRET;
+
+    if (!syncSecret || authHeader !== `Bearer ${syncSecret}`) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const body = await c.req.json();
+    const { rows } = body;
+
+    if (!Array.isArray(rows) || rows.length < 2) {
+      return c.json({ error: "Invalid rows format: spreadsheet data too short" }, 400);
+    }
+
+    const sql = getDb();
+    const participants = await sql`SELECT id, name FROM sot_participants`;
+
+    // 1. Locate date columns in header row
+    const headerCols: any[] = rows[0] || [];
+    const dateColIndices: { idx: number; isoDate: string }[] = [];
+
+    headerCols.forEach((col, idx) => {
+      const colStr = String(col).trim();
+      const match = colStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (match) {
+        const m = match[1].padStart(2, "0");
+        const d = match[2].padStart(2, "0");
+        const y = match[3];
+        dateColIndices.push({ idx, isoDate: `${y}-${m}-${d}` });
+      }
+    });
+
+    if (dateColIndices.length === 0) {
+      return c.json({ error: "No date columns matching M/D/YYYY found in sheet header" }, 400);
+    }
+
+    // 2. Parse matrix sheet rows into participant logs
+    let currentParticipantId: number | null = null;
+    let rowTypes: Record<string, string[]> = {};
+    const bulkPayloads: { participant_id: number; logs: any[] }[] = [];
+
+    for (let i = 1; i < rows.length; i++) {
+      const parts: string[] = (rows[i] || []).map((val: any) => String(val ?? "").trim());
+      const firstCol = parts[0];
+      if (!firstCol) continue;
+
+      if (["Steps", "Workout", "Yoga"].includes(firstCol)) {
+        if (currentParticipantId && !rowTypes[firstCol]) {
+          rowTypes[firstCol] = parts;
+        }
+      } else {
+        if (currentParticipantId && Object.keys(rowTypes).length > 0) {
+          const pLogs = extractMatrixLogs(rowTypes, dateColIndices);
+          if (pLogs.length > 0) bulkPayloads.push({ participant_id: currentParticipantId, logs: pLogs });
+        }
+
+        const firstName = firstCol.split(" ")[0].toLowerCase();
+        const matchP = participants.find((p: any) => {
+          const pFirst = p.name.toLowerCase().split(" ")[0];
+          return (
+            pFirst === firstName ||
+            firstName.startsWith(pFirst) ||
+            pFirst.startsWith(firstName)
+          );
+        });
+
+        currentParticipantId = matchP ? matchP.id : null;
+        rowTypes = {};
+      }
+    }
+
+    if (currentParticipantId && Object.keys(rowTypes).length > 0) {
+      const pLogs = extractMatrixLogs(rowTypes, dateColIndices);
+      if (pLogs.length > 0) bulkPayloads.push({ participant_id: currentParticipantId, logs: pLogs });
+    }
+
+    // 3. Write directly into Neon PostgreSQL
+    let totalEntries = 0;
+    for (const payload of bulkPayloads) {
+      for (const entry of payload.logs) {
+        await sql`
+          INSERT INTO sot_daily_logs (participant_id, log_date, steps, workout, yoga, updated_at)
+          VALUES (${Number(payload.participant_id)}, ${entry.log_date}, ${Number(entry.steps) || 0}, ${Number(entry.workout) || 0}, ${Number(entry.yoga) || 0}, NOW())
+          ON CONFLICT (participant_id, log_date)
+          DO UPDATE SET
+            steps = EXCLUDED.steps,
+            workout = EXCLUDED.workout,
+            yoga = EXCLUDED.yoga,
+            updated_at = NOW()
+        `;
+        totalEntries++;
+      }
+    }
+
+    return c.json({
+      success: true,
+      participantsSynced: bulkPayloads.length,
+      totalEntriesSynced: totalEntries,
+    });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
   }
