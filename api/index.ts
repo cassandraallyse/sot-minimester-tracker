@@ -371,18 +371,27 @@ app.post("/app-api/sync-sheet", async (c) => {
     const sql = getDb();
     const participants = await sql`SELECT id, name FROM sot_participants`;
 
-    // 1. Locate date columns in header row
+    // 1. Locate date columns in header row (supports raw ISO dates, "11/2/2026", and "Mon 11/2/2026")
     const headerCols: any[] = rows[0] || [];
     const dateColIndices: { idx: number; isoDate: string }[] = [];
 
     headerCols.forEach((col, idx) => {
-      const colStr = String(col).trim();
-      const match = colStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-      if (match) {
-        const m = match[1].padStart(2, "0");
-        const d = match[2].padStart(2, "0");
-        const y = match[3];
+      const colStr = String(col ?? "").trim();
+      
+      // Match M/D/YYYY anywhere in the cell (e.g. "Mon 11/2/2026" or "11/2/2026")
+      const slashMatch = colStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (slashMatch) {
+        const m = slashMatch[1].padStart(2, "0");
+        const d = slashMatch[2].padStart(2, "0");
+        const y = slashMatch[3];
         dateColIndices.push({ idx, isoDate: `${y}-${m}-${d}` });
+        return;
+      }
+
+      // Check if Apps Script serialized it as an ISO Date string (e.g. "2026-11-02T...")
+      const isoMatch = colStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (isoMatch) {
+        dateColIndices.push({ idx, isoDate: `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}` });
       }
     });
 
