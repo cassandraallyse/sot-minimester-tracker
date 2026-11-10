@@ -1,13 +1,63 @@
 import React, { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { UserPlus, Trash2, Calendar, Footprints, Dumbbell, Upload, Key, ChevronDown, ChevronUp, Check } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Footprints,
+  Dumbbell,
+  Leaf,
+  CheckCircle2,
+  Calendar,
+  Upload,
+  Trash2,
+  UserPlus,
+  UserX,
+  ChevronDown,
+  ChevronUp,
+  FolderPlus,
+  Users,
+  Lock,
+  Key,
+  Plus,
+  Minus,
+} from "lucide-react";
+
+function formatDate(dateStr: string): string {
+  if (!dateStr) return "";
+  const cleanStr = String(dateStr).split("T")[0];
+  const [year, month, day] = cleanStr.split("-").map(Number);
+  if (!year || !month || !day) return dateStr;
+  const date = new Date(year, month - 1, day);
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"' || char === "'") {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim().replace(/^["']|["']$/g, ""));
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim().replace(/^["']|["']$/g, ""));
+  return result;
+}
+
+type Group = {
+  id: number;
+  name: string;
+};
 
 type Participant = {
   id: number;
+  group_id: number | null;
   name: string;
   location: string;
-  steps_goal: number;
-  workouts_goal: number;
 };
 
 type LogEntry = {
@@ -19,332 +69,444 @@ type LogEntry = {
   yoga: number;
 };
 
+const today = new Date().toISOString().split("T")[0];
+
 export default function Admin() {
   const queryClient = useQueryClient();
-  const [passcode, setPasscode] = useState("");
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authError, setAuthError] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState<string>("all");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  // Single mode state
+  const [date, setDate] = useState(today);
+  const [steps, setSteps] = useState("");
+  const [workout, setWorkout] = useState(0);
+  const [yoga, setYoga] = useState(0);
+
+  // Accordions
+  const [showManageGroups, setShowManageGroups] = useState(false);
   const [showManageThotties, setShowManageThotties] = useState(false);
-  const [selectedThottie, setSelectedThottie] = useState<Participant | null>(null);
+  const [showManageSecurity, setShowManageSecurity] = useState(false);
 
-  // New Participant Form
+  // Form states
+  const [newGroupName, setNewGroupName] = useState("");
+  const [addingGroup, setAddingGroup] = useState(false);
   const [newName, setNewName] = useState("");
   const [newLocation, setNewLocation] = useState("");
-  const [newStepsGoal, setNewStepsGoal] = useState(280000);
-  const [newWorkoutsGoal, setNewWorkoutsGoal] = useState(12);
-
-  // Single Day Entry Form
-  const [logDate, setLogDate] = useState("2026-08-13");
-  const [logSteps, setLogSteps] = useState("");
-  const [workoutCompleted, setWorkoutCompleted] = useState<boolean | null>(null);
-  const [yogaCompleted, setYogaCompleted] = useState<boolean | null>(null);
-  const [singleStatus, setSingleStatus] = useState("");
-
-  // CSV File Upload
+  const [assignGroupId, setAssignGroupId] = useState<string>("");
+  const [addingParticipant, setAddingParticipant] = useState(false);
+  const [newAdminPasscode, setNewAdminPasscode] = useState("");
+  const [updatingPasscode, setUpdatingPasscode] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [csvStatus, setCsvStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Passcode Auth State (Default: 2026)
+  const [passcode, setPasscode] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passError, setPassError] = useState("");
+
+  function showToast(text: string, type: "success" | "error" = "success") {
+    setStatusMsg({ type, text });
+    setTimeout(() => setStatusMsg(null), 4000);
+  }
+
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    setAuthError("");
-    const res = await fetch("/app-api/verify-passcode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode }),
-    });
-    if (res.ok) {
-      setIsAuthenticated(true);
-    } else {
-      setAuthError("Incorrect passcode");
+    if (!passcode) {
+      setPassError("Please enter a passcode.");
+      return;
     }
-  };
-
-  const { data: participants = [] } = useQuery<Participant[]>({
-    queryKey: ["admin-participants"],
-    queryFn: () => fetch("/app-api/participants").then((r) => r.json()),
-    enabled: isAuthenticated,
-  });
-
-  const { data: recentLogs = [], refetch: refetchLogs } = useQuery<LogEntry[]>({
-    queryKey: ["recent-logs", selectedThottie?.id],
-    queryFn: () =>
-      fetch(`/app-api/logs/${selectedThottie?.id}`).then((r) => r.json()),
-    enabled: !!selectedThottie,
-  });
-
-  const addParticipantMutation = useMutation({
-    mutationFn: (newP: any) =>
-      fetch("/app-api/participants", {
+    try {
+      const res = await fetch("/app-api/verify-passcode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newP),
-      }).then((r) => r.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-participants"] });
+        body: JSON.stringify({ passcode, groupId: selectedGroupId }),
+      });
+      if (res.ok) {
+        setIsAuthenticated(true);
+        setPassError("");
+      } else {
+        setPassError("Incorrect passcode. Try again.");
+      }
+    } catch {
+      setPassError("Error verifying passcode.");
+    }
+  }
+
+  const { data: groups = [] } = useQuery<Group[]>({
+    queryKey: ["groups"],
+    queryFn: () => fetch("/app-api/groups").then((r) => r.json()),
+  });
+
+  const { data: participants = [], isLoading } = useQuery<Participant[]>({
+    queryKey: ["participants", selectedGroupId],
+    queryFn: () =>
+      fetch(`/app-api/participants?groupId=${selectedGroupId}`).then((r) => r.json()),
+  });
+
+  const { data: logs = [] } = useQuery<LogEntry[]>({
+    queryKey: ["logs", selectedId],
+    queryFn: () => fetch(`/app-api/logs/${selectedId}`).then((r) => r.json()),
+    enabled: !!selectedId,
+  });
+
+  async function handleUpdatePasscode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newAdminPasscode.trim() || newAdminPasscode.trim().length < 4) {
+      showToast("Passcode must be at least 4 characters long", "error");
+      return;
+    }
+    setUpdatingPasscode(true);
+    try {
+      const res = await fetch("/app-api/update-passcode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          groupId: selectedGroupId,
+          newPasscode: newAdminPasscode.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update passcode");
+      showToast("Passcode updated successfully!");
+      setNewAdminPasscode("");
+    } catch {
+      showToast("Error updating passcode", "error");
+    } finally {
+      setUpdatingPasscode(false);
+    }
+  }
+
+  async function handleAddGroup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newGroupName.trim()) {
+      showToast("Please enter a group name", "error");
+      return;
+    }
+    setAddingGroup(true);
+    try {
+      const res = await fetch("/app-api/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newGroupName.trim() }),
+      });
+      if (!res.ok) throw new Error("Failed to add group");
+      showToast(`Group "${newGroupName}" created!`);
+      setNewGroupName("");
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+    } catch {
+      showToast("Error creating group", "error");
+    } finally {
+      setAddingGroup(false);
+    }
+  }
+
+  async function handleDeleteGroup(g: Group) {
+    if (!window.confirm(`Delete group "${g.name}"? Participants will become unassigned.`)) return;
+    try {
+      const res = await fetch(`/app-api/groups/${g.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete group");
+      showToast(`Group "${g.name}" deleted`);
+      if (selectedGroupId === String(g.id)) setSelectedGroupId("all");
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["participants"] });
+    } catch {
+      showToast("Error deleting group", "error");
+    }
+  }
+
+  async function handleAddParticipant(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newName.trim()) {
+      showToast("Please enter a name", "error");
+      return;
+    }
+    setAddingParticipant(true);
+    try {
+      const res = await fetch("/app-api/participants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName.trim(),
+          location: newLocation.trim(),
+          group_id: assignGroupId ? Number(assignGroupId) : null,
+          steps_goal: 420000,
+          workouts_goal: 18,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to add participant");
+      showToast(`${newName} added!`);
       setNewName("");
       setNewLocation("");
-    },
-  });
-
-  const deleteParticipantMutation = useMutation({
-    mutationFn: (id: number) =>
-      fetch(`/app-api/participants/${id}`, { method: "DELETE" }).then((r) => r.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-participants"] });
-      if (selectedThottie?.id) setSelectedThottie(null);
-    },
-  });
-
-  const handleSingleEntrySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedThottie) {
-      setSingleStatus("Please choose a Thottie first.");
-      return;
-    }
-    if (!logSteps) {
-      setSingleStatus("Please enter step count.");
-      return;
-    }
-
-    setSingleStatus("Saving...");
-    const res = await fetch("/app-api/logs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        participant_id: selectedThottie.id,
-        log_date: logDate,
-        steps: Number(logSteps.replace(/[^0-9]/g, "")),
-        workout: workoutCompleted ? 1 : 0,
-        yoga: yogaCompleted ? 1 : 0,
-      }),
-    });
-
-    if (res.ok) {
-      setSingleStatus("Saved successfully!");
-      setLogSteps("");
-      setWorkoutCompleted(null);
-      setYogaCompleted(null);
-      refetchLogs();
+      queryClient.invalidateQueries({ queryKey: ["participants"] });
       queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
-    } else {
-      setSingleStatus("Failed to save entry.");
+    } catch {
+      showToast("Error adding participant", "error");
+    } finally {
+      setAddingParticipant(false);
     }
-  };
+  }
 
-  const splitCsvLine = (line: string): string[] => {
-    const result: string[] = [];
-    let current = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        result.push(current.trim().replace(/^"|"$/g, ""));
-        current = "";
-      } else {
-        current += char;
-      }
+  async function handleDeleteParticipant(p: Participant) {
+    if (!window.confirm(`Remove ${p.name}? This also removes their log history!`)) return;
+    try {
+      const res = await fetch(`/app-api/participants/${p.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete");
+      showToast(`${p.name} removed`);
+      if (selectedId === p.id) setSelectedId(null);
+      queryClient.invalidateQueries({ queryKey: ["participants"] });
+      queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+    } catch {
+      showToast("Error removing participant", "error");
     }
-    result.push(current.trim().replace(/^"|"$/g, ""));
-    return result;
-  };
+  }
 
-  const parseDateStr = (raw: string): string | null => {
-    if (!raw) return null;
-
-    let clean = raw.trim().replace(/^"|"$/g, "");
-    if (clean.includes("#") || clean.toLowerCase().includes("total") || clean.toLowerCase().includes("week")) {
-      return null;
-    }
-
-    clean = clean.replace(/^(mon|tue|wed|thu|fri|sat|sun)\w*\s*/i, "");
-
-    if (clean.match(/^\d{4}-\d{2}-\d{2}$/)) return clean;
-
-    const parts = clean.split(/[\/\-]/);
-    if (parts.length === 2) {
-      const m = parseInt(parts[0], 10);
-      const d = parseInt(parts[1], 10);
-      if (!isNaN(m) && !isNaN(d) && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-        const month = String(m).padStart(2, "0");
-        const day = String(d).padStart(2, "0");
-        return `2026-${month}-${day}`;
-      }
-    } else if (parts.length === 3) {
-      const m = parseInt(parts[0], 10);
-      const d = parseInt(parts[1], 10);
-      if (!isNaN(m) && !isNaN(d) && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-        const month = String(m).padStart(2, "0");
-        const day = String(d).padStart(2, "0");
-        const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
-        return `${year}-${month}-${day}`;
-      }
-    }
-    return null;
-  };
-
-  const handleFileUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!csvFile) {
-      setCsvStatus("Please choose a CSV file first.");
+  async function handleSingleSave() {
+    if (!selectedId) {
+      showToast("Select a participant first", "error");
       return;
     }
+    if (!date) {
+      showToast("Date is required", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/app-api/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          participant_id: selectedId,
+          log_date: date,
+          steps: steps === "" ? 0 : Number(steps),
+          workout,
+          yoga,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      showToast("Entry saved!");
+      queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+      queryClient.invalidateQueries({ queryKey: ["logs", selectedId] });
+      setSteps("");
+      setWorkout(0);
+      setYoga(0);
+    } catch {
+      showToast("Something went wrong saving entry", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
 
+  function extractMatrixLogs(
+    rowTypes: Record<string, string[]>,
+    dateColIndices: { idx: number; isoDate: string }[]
+  ) {
+    const stepsRow = rowTypes["Steps"] || [];
+    const workoutRow = rowTypes["Workout"] || [];
+    const yogaRow = rowTypes["Yoga"] || [];
+    const logs = [];
+
+    for (const { idx, isoDate } of dateColIndices) {
+      const sRaw = (stepsRow[idx] || "0").replace(/,/g, "");
+      const wRaw = (workoutRow[idx] || "0").trim().toLowerCase();
+      const yRaw = (yogaRow[idx] || "0").trim().toLowerCase();
+
+      const stepsNum = parseInt(sRaw, 10) || 0;
+      let wNum = 0;
+      if (wRaw === "y" || wRaw === "true") wNum = 1;
+      else wNum = parseInt(wRaw, 10) || 0;
+
+      let yNum = 0;
+      if (yRaw === "y" || yRaw === "true") yNum = 1;
+      else yNum = parseInt(yRaw, 10) || 0;
+
+      if (stepsNum > 0 || wNum > 0 || yNum > 0) {
+        logs.push({ log_date: isoDate, steps: stepsNum, workout: wNum, yoga: yNum });
+      }
+    }
+    return logs;
+  }
+
+  async function handleFileUpload() {
+    if (!csvFile) {
+      showToast("Please choose a CSV file to upload", "error");
+      return;
+    }
+    setSaving(true);
     const reader = new FileReader();
-    reader.onload = async (event) => {
+
+    reader.onload = async (e) => {
       try {
-        setCsvStatus("Processing multi-participant spreadsheet...");
-        const text = event.target?.result as string;
-        const rawLines = text.split("\n").filter((l) => l.trim().length > 0);
-        const lines = rawLines.map(splitCsvLine);
+        const text = e.target?.result as string;
+        if (!text) throw new Error("File is empty");
 
-        // Extract dates from row 1
-        const datesRow = lines[0] || [];
-        const dateMap: { col: number; dateStr: string }[] = [];
-        for (let col = 1; col < datesRow.length; col++) {
-          const parsed = parseDateStr(datesRow[col]);
-          if (parsed) {
-            dateMap.push({ col, dateStr: parsed });
+        const rawLines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+        if (rawLines.length < 2) throw new Error("CSV file too short");
+
+        const headerCols = parseCsvLine(rawLines[0]);
+        const dateColIndices: { idx: number; isoDate: string }[] = [];
+        headerCols.forEach((col, idx) => {
+          const match = col.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (match) {
+            const m = match[1].padStart(2, "0");
+            const d = match[2].padStart(2, "0");
+            const y = match[3];
+            dateColIndices.push({ idx, isoDate: `${y}-${m}-${d}` });
           }
-        }
+        });
 
-        if (dateMap.length === 0) {
-          setCsvStatus("Could not find date headers in row 1.");
-          return;
-        }
+        const isMatrixSheet = dateColIndices.length > 0;
 
-        // Refetch latest participant list to map existing IDs
-        const currentParticipantsRes = await fetch("/app-api/participants");
-        let activeParticipants: Participant[] = await currentParticipantsRes.json();
+        if (isMatrixSheet) {
+          let currentParticipantId: number | null = null;
+          let rowTypes: Record<string, string[]> = {};
+          const bulkPayloads: { participant_id: number; logs: any[] }[] = [];
 
-        let importedCount = 0;
-        let importedPeople = 0;
+          for (let i = 1; i < rawLines.length; i++) {
+            const parts = parseCsvLine(rawLines[i]);
+            const firstCol = parts[0];
+            if (!firstCol) continue;
 
-        // Scan rows for participant blocks
-        for (let i = 1; i < lines.length; i++) {
-          const firstCol = (lines[i][0] || "").trim();
-          const headerLower = firstCol.toLowerCase();
-
-          // A name row is non-empty and not steps/workout/yoga/total/goal
-          if (
-            firstCol &&
-            !headerLower.includes("step") &&
-            !headerLower.includes("workout") &&
-            !headerLower.includes("yoga") &&
-            !headerLower.includes("total") &&
-            !headerLower.includes("goal")
-          ) {
-            const personName = firstCol;
-
-            // Look ahead for steps, workout, yoga rows
-            let stepsLine: string[] = [];
-            let workoutLine: string[] = [];
-            let yogaLine: string[] = [];
-
-            for (let k = i + 1; k < Math.min(i + 5, lines.length); k++) {
-              const rowLabel = (lines[k][0] || "").toLowerCase();
-              if (rowLabel.includes("step")) stepsLine = lines[k];
-              if (rowLabel.includes("workout")) workoutLine = lines[k];
-              if (rowLabel.includes("yoga")) yogaLine = lines[k];
-            }
-
-            if (stepsLine.length > 0) {
-              // Find or create participant
-              let participant = activeParticipants.find(
-                (p) => p.name.toLowerCase().trim() === personName.toLowerCase().trim()
-              );
-
-              if (!participant) {
-                const newP = await addParticipantMutation.mutateAsync({
-                  name: personName,
-                  location: "",
-                  steps_goal: 280000,
-                  workouts_goal: 12,
-                });
-                participant = newP;
-                activeParticipants.push(newP);
+            if (["Steps", "Workout", "Yoga"].includes(firstCol)) {
+              if (currentParticipantId && !rowTypes[firstCol]) {
+                rowTypes[firstCol] = parts;
               }
-
-              if (participant) {
-                const logs = [];
-                for (const d of dateMap) {
-                  const rawSteps = (stepsLine[d.col] || "").replace(/[^0-9]/g, "");
-                  const steps = parseInt(rawSteps, 10) || 0;
-
-                  const rawWorkout = (workoutLine[d.col] || "").replace(/[^0-9.]/g, "");
-                  const workoutVal = parseFloat(rawWorkout) || 0;
-
-                  const rawYoga = (yogaLine[d.col] || "").replace(/[^0-9.]/g, "");
-                  const yogaVal = parseFloat(rawYoga) || 0;
-
-                  if (steps > 0 || workoutVal > 0 || yogaVal > 0) {
-                    logs.push({
-                      log_date: d.dateStr,
-                      steps,
-                      workout: workoutVal > 0 ? 1 : 0,
-                      yoga: yogaVal > 0 ? 1 : 0,
-                    });
-                  }
-                }
-
-                if (logs.length > 0) {
-                  const res = await fetch("/app-api/logs/bulk", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      participant_id: participant.id,
-                      logs,
-                    }),
-                  });
-
-                  if (res.ok) {
-                    importedCount += logs.length;
-                    importedPeople++;
-                  }
-                }
+            } else {
+              if (currentParticipantId && Object.keys(rowTypes).length > 0) {
+                const pLogs = extractMatrixLogs(rowTypes, dateColIndices);
+                if (pLogs.length > 0) bulkPayloads.push({ participant_id: currentParticipantId, logs: pLogs });
               }
+              const firstName = firstCol.split(" ")[0].toLowerCase();
+              const matchP = participants.find((p) => {
+                const pFirst = p.name.toLowerCase().split(" ")[0];
+                return (
+                  pFirst === firstName ||
+                  firstName.startsWith(pFirst) ||
+                  pFirst.startsWith(firstName)
+                );
+              });
+              currentParticipantId = matchP ? matchP.id : null;
+              rowTypes = {};
             }
           }
-        }
 
-        if (importedPeople > 0) {
-          setCsvStatus(`Successfully imported ${importedCount} logs across ${importedPeople} participants!`);
-          setCsvFile(null);
-          refetchLogs();
-          queryClient.invalidateQueries({ queryKey: ["admin-participants"] });
+          if (currentParticipantId && Object.keys(rowTypes).length > 0) {
+            const pLogs = extractMatrixLogs(rowTypes, dateColIndices);
+            if (pLogs.length > 0) bulkPayloads.push({ participant_id: currentParticipantId, logs: pLogs });
+          }
+
+          if (bulkPayloads.length === 0) {
+            showToast("No matching participant entries found in spreadsheet.", "error");
+            setSaving(false);
+            return;
+          }
+
+          let totalCount = 0;
+          for (const payload of bulkPayloads) {
+            const res = await fetch("/app-api/logs/bulk", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (res.ok) totalCount += payload.logs.length;
+          }
+
+          showToast(`Uploaded ${totalCount} entries across participants!`);
           queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+          if (selectedId) queryClient.invalidateQueries({ queryKey: ["logs", selectedId] });
+          setCsvFile(null);
         } else {
-          setCsvStatus("No valid logs imported from spreadsheet.");
+          if (!selectedId) {
+            showToast("Select a participant first for single-person CSV", "error");
+            setSaving(false);
+            return;
+          }
+          const parsedLogs = [];
+          for (let i = 0; i < rawLines.length; i++) {
+            const parts = parseCsvLine(rawLines[i]);
+            if (i === 0 && isNaN(Number(parts[1]))) continue;
+            if (parts.length >= 2) {
+              const log_date = parts[0];
+              const stepsNum = Number(parts[1]) || 0;
+              const wVal = parts[2]?.trim().toLowerCase();
+              let wNum = 0;
+              if (wVal === "y" || wVal === "true") wNum = 1;
+              else wNum = parseInt(wVal, 10) || 0;
+
+              const yVal = parts[3]?.trim().toLowerCase();
+              let yNum = 0;
+              if (yVal === "y" || yVal === "true") yNum = 1;
+              else yNum = parseInt(yVal, 10) || 0;
+
+              parsedLogs.push({ log_date, steps: stepsNum, workout: wNum, yoga: yNum });
+            }
+          }
+          if (parsedLogs.length === 0) {
+            showToast("No valid entries found in file.", "error");
+            setSaving(false);
+            return;
+          }
+          const res = await fetch("/app-api/logs/bulk", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ participant_id: selectedId, logs: parsedLogs }),
+          });
+          if (!res.ok) throw new Error("Bulk upload failed");
+          showToast(`Uploaded ${parsedLogs.length} rows!`);
+          queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+          queryClient.invalidateQueries({ queryKey: ["logs", selectedId] });
+          setCsvFile(null);
         }
-      } catch (err: any) {
-        setCsvStatus(`Error: ${err.message}`);
+      } catch {
+        showToast("Error processing CSV file", "error");
+      } finally {
+        setSaving(false);
       }
     };
     reader.readAsText(csvFile);
-  };
+  }
+
+  async function handleDeleteEntry(id: number) {
+    if (!window.confirm("Delete this log entry?")) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/app-api/logs/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete");
+      showToast("Entry deleted");
+      queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+      queryClient.invalidateQueries({ queryKey: ["logs", selectedId] });
+    } catch {
+      showToast("Error deleting entry", "error");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  const selected = participants.find((p) => p.id === selectedId);
 
   if (!isAuthenticated) {
     return (
-      <div className="max-w-md mx-auto mt-12 bg-white border border-gray-200 p-6 rounded-lg shadow-sm space-y-4">
-        <h2 className="text-lg font-bold flex items-center gap-2 text-gray-800">
-          <Key className="size-5 text-gray-700" /> Admin Access
-        </h2>
+      <div className="max-w-sm mx-auto my-12 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
+        <div className="text-center space-y-1">
+          <h2 className="text-lg font-semibold text-white flex items-center justify-center gap-2">
+            <Lock className="size-4 text-purple-400" /> Admin Access
+          </h2>
+          <p className="text-xs text-slate-400">Enter passcode to manage entries & groups.</p>
+        </div>
         <form onSubmit={handleLogin} className="space-y-3">
           <input
             type="password"
-            placeholder="Enter Admin Passcode"
+            placeholder="Enter Passcode"
             value={passcode}
             onChange={(e) => setPasscode(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-300 px-3 py-2 rounded-md text-sm text-gray-900 focus:outline-none"
+            className="w-full text-center tracking-widest text-lg bg-slate-950 border border-slate-700 text-white rounded-lg p-2.5 placeholder-slate-500 focus:outline-none focus:border-purple-500"
           />
-          {authError && <p className="text-xs text-red-600">{authError}</p>}
+          {passError && <p className="text-xs text-rose-400 text-center font-medium">{passError}</p>}
           <button
             type="submit"
-            className="w-full bg-gray-800 hover:bg-gray-900 text-white py-2 rounded-md text-sm font-semibold transition"
+            className="w-full py-2.5 px-4 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-medium text-sm transition shadow"
           >
-            Unlock Admin
+            Unlock Admin Panel
           </button>
         </form>
       </div>
@@ -352,63 +514,98 @@ export default function Admin() {
   }
 
   return (
-    <div className="space-y-6 text-gray-900">
-      <h1 className="text-2xl font-bold tracking-tight">Log Entries</h1>
+    <div className="space-y-6 text-slate-100 max-w-6xl mx-auto px-4 py-6">
+      {statusMsg && (
+        <div
+          className={`fixed top-4 right-4 z-50 px-4 py-2.5 rounded-lg text-sm font-medium shadow-lg transition-all ${
+            statusMsg.type === "success"
+              ? "bg-emerald-600 text-white"
+              : "bg-rose-600 text-white"
+          }`}
+        >
+          {statusMsg.text}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-        {/* Left Column (Forms) */}
-        <div className="md:col-span-7 space-y-6">
-          {/* Manage Thotties Accordion */}
-          <div className="border border-gray-200 bg-white rounded-lg overflow-hidden shadow-sm">
+      <h1 className="text-2xl font-bold tracking-tight text-white">Log Entries & Admin</h1>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Left Side */}
+        <div className="space-y-6">
+          {/* Security */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
             <button
-              onClick={() => setShowManageThotties(!showManageThotties)}
-              className="w-full px-4 py-3 text-left font-medium text-sm flex items-center justify-between text-gray-800 hover:bg-gray-50"
+              type="button"
+              onClick={() => setShowManageSecurity(!showManageSecurity)}
+              className="w-full px-5 py-3.5 flex items-center justify-between text-sm font-semibold text-white hover:bg-slate-800/50 transition"
             >
               <span className="flex items-center gap-2">
-                <UserPlus className="size-4" /> Manage Thotties (Add / Remove)
+                <Key className="size-4 text-purple-400" /> Change Admin Passcode
               </span>
-              {showManageThotties ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              {showManageSecurity ? <ChevronUp className="size-4 text-slate-400" /> : <ChevronDown className="size-4 text-slate-400" />}
             </button>
-
-            {showManageThotties && (
-              <div className="p-4 border-t border-gray-200 space-y-4 bg-gray-50">
-                <div className="grid grid-cols-2 gap-2">
+            {showManageSecurity && (
+              <div className="p-5 border-t border-slate-800 space-y-3 bg-slate-950/40">
+                <form onSubmit={handleUpdatePasscode} className="space-y-3">
                   <input
-                    type="text"
-                    placeholder="Name"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    className="bg-white border border-gray-300 px-3 py-1.5 rounded-md text-sm"
+                    type="password"
+                    placeholder="Enter New Passcode (min 4 chars)"
+                    value={newAdminPasscode}
+                    onChange={(e) => setNewAdminPasscode(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs placeholder-slate-500 focus:outline-none focus:border-purple-500"
                   />
-                  <input
-                    type="text"
-                    placeholder="Location (e.g. CA)"
-                    value={newLocation}
-                    onChange={(e) => setNewLocation(e.target.value)}
-                    className="bg-white border border-gray-300 px-3 py-1.5 rounded-md text-sm"
-                  />
-                </div>
-                <button
-                  onClick={() =>
-                    addParticipantMutation.mutate({
-                      name: newName,
-                      location: newLocation,
-                      steps_goal: newStepsGoal,
-                      workouts_goal: newWorkoutsGoal,
-                    })
-                  }
-                  className="bg-gray-800 text-white px-3 py-1.5 rounded-md text-xs font-semibold"
-                >
-                  Add Thottie
-                </button>
+                  <button
+                    type="submit"
+                    disabled={updatingPasscode}
+                    className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition"
+                  >
+                    {updatingPasscode ? "Updating..." : "Update Passcode"}
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
 
-                <div className="divide-y divide-gray-200 pt-2">
-                  {participants.map((p) => (
-                    <div key={p.id} className="py-2 flex items-center justify-between text-xs">
-                      <span>{p.name} ({p.location || "N/A"})</span>
+          {/* Manage Groups */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+            <button
+              type="button"
+              onClick={() => setShowManageGroups(!showManageGroups)}
+              className="w-full px-5 py-3.5 flex items-center justify-between text-sm font-semibold text-white hover:bg-slate-800/50 transition"
+            >
+              <span className="flex items-center gap-2">
+                <FolderPlus className="size-4 text-purple-400" /> Manage Groups / Cohorts
+              </span>
+              {showManageGroups ? <ChevronUp className="size-4 text-slate-400" /> : <ChevronDown className="size-4 text-slate-400" />}
+            </button>
+            {showManageGroups && (
+              <div className="p-5 border-t border-slate-800 space-y-4 bg-slate-950/40">
+                <form onSubmit={handleAddGroup} className="flex gap-2">
+                  <input
+                    placeholder="Group Name (e.g. casey-1)"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={addingGroup}
+                    className="px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold shrink-0 transition"
+                  >
+                    Add Group
+                  </button>
+                </form>
+                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                  {groups.map((g) => (
+                    <div
+                      key={g.id}
+                      className="flex items-center justify-between text-xs py-1.5 px-2 bg-slate-950 rounded-md border border-slate-800"
+                    >
+                      <span className="font-medium text-slate-200">{g.name}</span>
                       <button
-                        onClick={() => deleteParticipantMutation.mutate(p.id)}
-                        className="text-red-600 hover:text-red-800"
+                        type="button"
+                        onClick={() => handleDeleteGroup(g)}
+                        className="text-slate-400 hover:text-rose-400 p-1 transition"
                       >
                         <Trash2 className="size-3.5" />
                       </button>
@@ -419,182 +616,325 @@ export default function Admin() {
             )}
           </div>
 
-          {/* Step 1: Choose Thottie Grid */}
-          <div className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-600">
-              Step 1: Choose Thottie (For Single Entry or CSV)
-            </h2>
-            <div className="grid grid-cols-2 gap-2">
-              {participants.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setSelectedThottie(p)}
-                  className={`px-3 py-2 text-left rounded-md border text-xs font-medium transition ${
-                    selectedThottie?.id === p.id
-                      ? "border-gray-800 bg-gray-800 text-white"
-                      : "border-gray-200 bg-white text-gray-800 hover:border-gray-400"
-                  }`}
+          {/* Manage Participants */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+            <button
+              type="button"
+              onClick={() => setShowManageThotties(!showManageThotties)}
+              className="w-full px-5 py-3.5 flex items-center justify-between text-sm font-semibold text-white hover:bg-slate-800/50 transition"
+            >
+              <span className="flex items-center gap-2">
+                <UserPlus className="size-4 text-purple-400" /> Manage Participants (Add / Remove)
+              </span>
+              {showManageThotties ? <ChevronUp className="size-4 text-slate-400" /> : <ChevronDown className="size-4 text-slate-400" />}
+            </button>
+            {showManageThotties && (
+              <div className="p-5 border-t border-slate-800 space-y-4 bg-slate-950/40">
+                <form onSubmit={handleAddParticipant} className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      placeholder="Name"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      className="bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                    <input
+                      placeholder="State (e.g. CA)"
+                      value={newLocation}
+                      onChange={(e) => setNewLocation(e.target.value)}
+                      className="bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                  {groups.length > 0 && (
+                    <select
+                      value={assignGroupId}
+                      onChange={(e) => setAssignGroupId(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs focus:outline-none focus:border-purple-500"
+                    >
+                      <option value="">Assign to Group (Optional)</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={addingParticipant}
+                    className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition"
+                  >
+                    Add Participant (420k steps · 18 workouts)
+                  </button>
+                </form>
+                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                  {participants.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between text-xs py-1.5 px-2 bg-slate-950 rounded-md border border-slate-800"
+                    >
+                      <span className="font-medium text-slate-200">
+                        {p.name} {p.location && `(${p.location})`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteParticipant(p)}
+                        className="text-slate-400 hover:text-rose-400 p-1 transition"
+                      >
+                        <UserX className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Participant Select */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-4 shadow-sm">
+            {groups.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Users className="size-3.5 text-purple-400" /> Filter by Group:
+                </label>
+                <select
+                  value={selectedGroupId}
+                  onChange={(e) => {
+                    setSelectedGroupId(e.target.value);
+                    setSelectedId(null);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs focus:outline-none focus:border-purple-500"
                 >
-                  {p.name} {p.location ? `(${p.location})` : ""}
-                </button>
-              ))}
+                  <option value="all">All Groups</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div>
+              <p className="text-xs font-semibold text-slate-300 mb-2">Select Participant to Log For:</p>
+              {participants.length === 0 && !isLoading ? (
+                <p className="text-xs text-slate-500 py-3 text-center border border-dashed border-slate-800 rounded-lg">
+                  No participants found. Add one above!
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                  {participants.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setSelectedId(p.id)}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium border truncate transition ${
+                        selectedId === p.id
+                          ? "bg-purple-600 text-white border-purple-500 font-bold"
+                          : "bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white"
+                      }`}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
           {/* Option A: Single Day Entry */}
-          <form
-            onSubmit={handleSingleEntrySubmit}
-            className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-4"
-          >
-            <h2 className="text-sm font-bold text-gray-900">Option A: Single Day Entry</h2>
-
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-4 shadow-sm">
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider">Option A: Single Day Entry</h2>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                <Calendar className="size-3.5" /> Date
+              <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                <Calendar className="size-3.5 text-purple-400" /> Date
               </label>
               <input
                 type="date"
-                value={logDate}
-                onChange={(e) => setLogDate(e.target.value)}
-                className="w-full bg-white border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                max={today}
+                className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs [color-scheme:dark] focus:outline-none focus:border-purple-500"
               />
             </div>
-
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                <Footprints className="size-3.5" /> Steps
+              <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                <Footprints className="size-3.5 text-purple-400" /> Steps
               </label>
               <input
-                type="text"
-                placeholder="e.g. 8,432"
-                value={logSteps}
-                onChange={(e) => setLogSteps(e.target.value)}
-                className="w-full bg-white border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                type="number"
+                placeholder="e.g. 10000"
+                value={steps}
+                onChange={(e) => setSteps(e.target.value)}
+                min={0}
+                className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg p-2 text-xs placeholder-slate-500 focus:outline-none focus:border-purple-500"
               />
             </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                <Dumbbell className="size-3.5" /> Workout completed?
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                <Dumbbell className="size-3.5 text-sky-400" /> Workouts
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setWorkoutCompleted(true)}
-                  className={`py-1.5 rounded-md border text-xs font-semibold flex items-center justify-center gap-1 ${
-                    workoutCompleted === true ? "bg-gray-800 text-white" : "border-gray-300 text-gray-700"
+                  onClick={() => setWorkout(Math.max(0, workout - 1))}
+                  className="size-8 flex items-center justify-center bg-slate-950 border border-slate-800 rounded-lg text-slate-300 hover:text-white"
+                >
+                  <Minus className="size-3" />
+                </button>
+                <div className="flex-1 flex gap-1">
+                  {[0, 1, 2].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setWorkout(num)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                        workout === num
+                          ? "bg-purple-600 text-white border-purple-500"
+                          : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWorkout(workout + 1)}
+                  className="size-8 flex items-center justify-center bg-slate-950 border border-slate-800 rounded-lg text-slate-300 hover:text-white"
+                >
+                  <Plus className="size-3" />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                <Leaf className="size-3.5 text-emerald-400" /> Yoga Completed?
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setYoga(1)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium border flex items-center justify-center gap-1.5 transition ${
+                    yoga === 1
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/40 font-bold"
+                      : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
                   }`}
                 >
-                  <Check className="size-3.5" /> Yes
+                  <CheckCircle2 className="size-3.5" /> Yes
                 </button>
                 <button
                   type="button"
-                  onClick={() => setWorkoutCompleted(false)}
-                  className={`py-1.5 rounded-md border text-xs font-semibold flex items-center justify-center gap-1 ${
-                    workoutCompleted === false ? "bg-gray-800 text-white" : "border-gray-300 text-gray-700"
+                  onClick={() => setYoga(0)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition ${
+                    yoga === 0
+                      ? "bg-slate-800 text-white border-slate-600 font-bold"
+                      : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
                   }`}
                 >
                   No
                 </button>
               </div>
             </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                Yoga completed?
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setYogaCompleted(true)}
-                  className={`py-1.5 rounded-md border text-xs font-semibold flex items-center justify-center gap-1 ${
-                    yogaCompleted === true ? "bg-gray-800 text-white" : "border-gray-300 text-gray-700"
-                  }`}
-                >
-                  <Check className="size-3.5" /> Yes
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setYogaCompleted(false)}
-                  className={`py-1.5 rounded-md border text-xs font-semibold flex items-center justify-center gap-1 ${
-                    yogaCompleted === false ? "bg-gray-800 text-white" : "border-gray-300 text-gray-700"
-                  }`}
-                >
-                  No
-                </button>
-              </div>
-            </div>
-
             <button
-              type="submit"
-              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-md text-xs font-bold transition"
+              type="button"
+              onClick={handleSingleSave}
+              disabled={saving || !selectedId}
+              className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-medium text-xs rounded-lg transition shadow"
             >
-              Save Single Entry
+              {saving ? "Saving..." : "Save Single Entry"}
             </button>
-            {singleStatus && <p className="text-xs font-medium text-gray-700 mt-1">{singleStatus}</p>}
-          </form>
+          </div>
 
-          {/* Option B: Upload Spreadsheet CSV */}
-          <form
-            onSubmit={handleFileUpload}
-            className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-3"
-          >
-            <h2 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
-              <Upload className="size-4" /> Option B: Upload Spreadsheet (CSV)
+          {/* Option B: Upload Spreadsheet */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-3 shadow-sm">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wider">
+              <Upload className="size-4 text-purple-400" /> Option B: Upload Spreadsheet (CSV)
             </h2>
-            <p className="text-xs text-gray-500">
-              Upload full Tracking Sheet or single-person CSV.
-            </p>
             <input
               type="file"
               accept=".csv"
               onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
-              className="text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+              className="block w-full text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-white hover:file:bg-slate-700 cursor-pointer"
             />
             <button
-              type="submit"
-              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-md text-xs font-bold transition"
+              type="button"
+              onClick={handleFileUpload}
+              disabled={saving || !csvFile}
+              className="w-full py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-medium text-xs rounded-lg transition shadow"
             >
-              Upload Spreadsheet
+              {saving ? "Uploading..." : "Upload Spreadsheet"}
             </button>
-            {csvStatus && <p className="text-xs font-medium text-gray-700 mt-1">{csvStatus}</p>}
-          </form>
+          </div>
         </div>
 
-        {/* Right Column: Select a Thottie Details */}
-        <div className="md:col-span-5">
-          <div className="border border-gray-200 bg-white p-5 rounded-lg shadow-sm min-h-[300px]">
-            <h2 className="text-sm font-semibold text-gray-800">
-              {selectedThottie ? `${selectedThottie.name}'s Recent Entries` : "Select a Thottie"}
-            </h2>
-
-            {!selectedThottie ? (
-              <p className="text-xs text-gray-500 mt-8 text-center">
-                Choose a Thottie on the left to see their recent entries.
-              </p>
-            ) : (
-              <div className="mt-4 space-y-2">
-                {recentLogs.length === 0 ? (
-                  <p className="text-xs text-gray-400">No entries logged yet.</p>
-                ) : (
-                  recentLogs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="p-2.5 bg-gray-50 border border-gray-100 rounded-md text-xs flex items-center justify-between"
-                    >
-                      <div>
-                        <p className="font-semibold text-gray-800">{log.log_date}</p>
-                        <p className="text-gray-500">
-                          {log.steps.toLocaleString()} steps · {log.workout ? "Workout" : "No Workout"}
-                          {log.yoga ? " · Yoga" : ""}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+        {/* Right Side: Recent Logs */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-3 h-fit shadow-sm">
+          <h2 className="text-base font-bold text-white">
+            {selected ? `${selected.name}'s Recent Logs` : "Select a Participant"}
+          </h2>
+          {!selected && (
+            <p className="text-xs text-slate-500 py-8 text-center">
+              Choose a participant on the left to inspect their recent entries.
+            </p>
+          )}
+          {selected && logs.length === 0 && (
+            <p className="text-xs text-slate-500 py-8 text-center">
+              No entries logged yet for {selected.name}.
+            </p>
+          )}
+          {logs.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400">
+                    <th className="text-left pb-2 font-medium">Date</th>
+                    <th className="text-right pb-2 font-medium">Steps</th>
+                    <th className="text-center pb-2 font-medium">
+                      <Dumbbell className="size-3 inline text-sky-400" />
+                    </th>
+                    <th className="text-center pb-2 font-medium">
+                      <Leaf className="size-3 inline text-emerald-400" />
+                    </th>
+                    <th className="text-right pb-2 font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {logs.map((log) => (
+                    <tr key={log.id}>
+                      <td className="py-2 text-slate-300 font-mono">{formatDate(log.log_date)}</td>
+                      <td className="py-2 text-right font-medium text-white font-mono">
+                        {log.steps > 0 ? log.steps.toLocaleString() : "—"}
+                      </td>
+                      <td className="py-2 text-center">
+                        {log.workout > 0 ? (
+                          <span className="text-emerald-400 font-bold">
+                            {log.workout > 1 ? `${log.workout}x` : "✓"}
+                          </span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 text-center">
+                        {log.yoga > 0 ? (
+                          <span className="text-emerald-400 font-bold">
+                            {log.yoga > 1 ? `${log.yoga}x` : "✓"}
+                          </span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteEntry(log.id)}
+                          disabled={deletingId === log.id}
+                          className="text-slate-400 hover:text-rose-400 p-1 transition"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>
