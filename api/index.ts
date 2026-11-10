@@ -211,7 +211,7 @@ app.get("/app-api/participants", async (c) => {
   }
 });
 
-// POST /app-api/participants — default goals set for 4 weeks (280k steps, 12 workouts)
+// POST /app-api/participants — 6-week minimester defaults: 420k steps, 18 workouts
 app.post("/app-api/participants", async (c) => {
   try {
     const sql = getDb();
@@ -222,7 +222,7 @@ app.post("/app-api/participants", async (c) => {
 
     const [row] = await sql`
       INSERT INTO sot_participants (name, location, group_id, steps_goal, workouts_goal)
-      VALUES (${name}, ${location || ""}, ${group_id || null}, ${steps_goal || 280000}, ${workouts_goal || 12})
+      VALUES (${name}, ${location || ""}, ${group_id || null}, ${steps_goal || 420000}, ${workouts_goal || 18})
       RETURNING *
     `;
     return c.json(row);
