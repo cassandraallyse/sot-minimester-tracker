@@ -61,9 +61,9 @@ const WEEK_WORKOUTS_GOAL = 3;
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 const RANK_LABELS = [
-  { min: 80, label: "On Fire 🔥", color: "text-success" },
-  { min: 50, label: "Crushing It 💪", color: "text-accent" },
-  { min: 25, label: "In Progress 📈", color: "text-warning" },
+  { min: 85, label: "Master Thottie 👑", color: "text-success" },
+  { min: 70, label: "Crushing It 💪", color: "text-accent" },
+  { min: 25, label: "Building Momentum ⚡", color: "text-warning" },
   { min: 0, label: "Just Getting Started 🌱", color: "text-secondary" },
 ];
 
@@ -78,16 +78,25 @@ const MANTRAS = [
   "Things are always working out for my highest good.",
 ];
 
-function getRankLabel(pct: number) {
-  return RANK_LABELS.find((r) => pct >= r.min) ?? RANK_LABELS[3];
+function getRankLabel(compositePct: number, stepsPct: number, workoutsPct: number) {
+  if (compositePct >= 85) {
+    if (stepsPct >= 75 && workoutsPct >= 75) {
+      return { label: "Master Thottie 👑", color: "text-success" };
+    }
+    if (workoutsPct > stepsPct) {
+      return { label: "Lifting Heavy 🏋️‍♀️", color: "text-accent" };
+    }
+    return { label: "Step Queen 👟", color: "text-accent" };
+  }
+  return RANK_LABELS.find((r) => compositePct >= r.min) ?? RANK_LABELS[3];
 }
 
 function getProgressVariant(
   pct: number,
 ): "success" | "warning" | "error" | "default" {
-  if (pct >= 80) return "success";
-  if (pct >= 40) return "default";
-  if (pct >= 15) return "warning";
+  if (pct >= 85) return "success";
+  if (pct >= 50) return "default";
+  if (pct >= 25) return "warning";
   return "error";
 }
 
@@ -171,12 +180,12 @@ export default function Leaderboard() {
 
   const currentGroupObj = groups.find((g) => String(g.id) === selectedGroupId);
 
-  // Locked 4-Week Minimester Dates: Aug 10, 2026 to Sept 6, 2026
-  const semesterStart = new Date(2026, 7, 10);
-  const TOTAL_WEEKS = 4;
-  const TOTAL_DAYS = 28;
+  // 6-Week Minimester Dates: November 16, 2026 to December 27, 2026
+  const semesterStart = new Date(2026, 10, 16);
+  const TOTAL_WEEKS = 6;
+  const TOTAL_DAYS = 42;
 
-  const dateRangeLabel = "August 10 – September 6, 2026";
+  const dateRangeLabel = "November 16 – December 27, 2026";
 
   const now = new Date();
   const diffInMs = Math.max(0, now.getTime() - semesterStart.getTime());
@@ -186,7 +195,7 @@ export default function Leaderboard() {
   let semesterProgressPct = Math.min(100, Math.max(0, Math.round((daysElapsed / TOTAL_DAYS) * 100)));
 
   if (daysElapsed >= TOTAL_DAYS) {
-    weeksElapsed = 4;
+    weeksElapsed = 6;
     semesterProgressPct = 100;
   }
 
@@ -212,14 +221,14 @@ export default function Leaderboard() {
 
       {/* Group / Cohort Selector */}
       {!isPrivateGroupView && groups.length > 0 && (
-        <div className="bg-raised border border-border rounded-xl p-3.5 flex items-center justify-between gap-4 shadow-sm">
-          <label className="text-xs font-semibold text-secondary flex items-center gap-2 shrink-0">
-            <Users className="size-4 text-accent" /> Select Group / Cohort:
+        <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between gap-4 shadow-sm">
+          <label className="text-xs font-semibold text-slate-300 flex items-center gap-2 shrink-0">
+            <Users className="size-4 text-purple-400" /> Select Group / Cohort:
           </label>
           <select
             value={selectedGroupId}
             onChange={(e) => setSelectedGroupId(e.target.value)}
-            className="bg-inset border border-border text-primary font-medium rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-accent cursor-pointer max-w-xs w-full transition"
+            className="bg-slate-950 border border-slate-700 text-white font-medium rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-purple-500 cursor-pointer max-w-xs w-full transition"
           >
             <option value="all">All Groups</option>
             {groups.map((g) => (
@@ -267,7 +276,8 @@ export default function Leaderboard() {
       {/* Player cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {participants.map((p, idx) => {
-          const rank = getRankLabel(p.steps_pct);
+          const compositePct = (p.steps_pct + p.workouts_pct) / 2;
+          const rank = getRankLabel(compositePct, p.steps_pct, p.workouts_pct);
           const medal = MEDALS[idx] ?? null;
           const stepsLeft = Math.max(0, p.steps_goal - p.steps_total);
           const workoutsLeft = Math.max(0, p.workouts_goal - p.workouts_total);
@@ -435,7 +445,7 @@ export default function Leaderboard() {
                   )}
                   <div>
                     <span className="text-sm font-bold text-accent">
-                      {((p.steps_pct + p.workouts_pct) / 2).toFixed(1)}%
+                      {compositePct.toFixed(1)}%
                     </span>
                     <span className="text-xs text-secondary ml-1">overall</span>
                   </div>

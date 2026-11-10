@@ -1,602 +1,468 @@
-import React, { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { UserPlus, Trash2, Calendar, Footprints, Dumbbell, Upload, Key, ChevronDown, ChevronUp, Check } from "lucide-react";
+function formatDate(dateStr: string): string {
+  if (!dateStr) return "";
+  const cleanStr = dateStr.split("T")[0];
+  const [year, month, day] = cleanStr.split("-").map(Number);
+  
+  if (!year || !month || !day) return dateStr;
+  
+  const date = new Date(year, month - 1, day);
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+import React, { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Progress } from "../components/Progress";
+import {
+  Footprints,
+  Dumbbell,
+  Award,
+  TrendingUp,
+  CalendarDays,
+  Clock,
+  Leaf,
+  Users,
+  Sparkles,
+  Quote,
+} from "lucide-react";
+
+type Group = {
+  id: number;
+  name: string;
+};
 
 type Participant = {
   id: number;
+  group_id: number;
   name: string;
   location: string;
   steps_goal: number;
   workouts_goal: number;
+  workouts_achievable: number;
+  steps_total: number;
+  workouts_total: number;
+  yoga_total: number;
+  steps_pct: number;
+  workouts_pct: number;
+  week_steps: number;
+  week_workouts: number;
 };
 
-type LogEntry = {
-  id: number;
-  participant_id: number;
-  log_date: string;
-  steps: number;
-  workout: number;
-  yoga: number;
+type LeaderboardResponse = {
+  rows: Participant[];
+  lastUpdated: string | null;
+  minLogDate: string | null;
 };
 
-export default function Admin() {
-  const queryClient = useQueryClient();
-  const [passcode, setPasscode] = useState("");
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authError, setAuthError] = useState("");
+const WEEK_STEPS_GOAL = 70000;
+const WEEK_WORKOUTS_GOAL = 3;
 
-  const [showManageThotties, setShowManageThotties] = useState(false);
-  const [selectedThottie, setSelectedThottie] = useState<Participant | null>(null);
+const MEDALS = ["🥇", "🥈", "🥉"];
+const RANK_LABELS = [
+  { min: 85, label: "Master Thottie 👑", color: "text-success" },
+  { min: 70, label: "Crushing It 💪", color: "text-accent" },
+  { min: 25, label: "Building Momentum ⚡", color: "text-warning" },
+  { min: 0, label: "Just Getting Started 🌱", color: "text-secondary" },
+];
 
-  // New Participant Form
-  const [newName, setNewName] = useState("");
-  const [newLocation, setNewLocation] = useState("");
-  const [newStepsGoal, setNewStepsGoal] = useState(280000);
-  const [newWorkoutsGoal, setNewWorkoutsGoal] = useState(12);
+const MANTRAS = [
+  "Miracles are happening!",
+  "Things are happening *for* me, not to me.",
+  "I'm getting stronger as I age.",
+  "I'm getting hotter as I age.",
+  "My body knows exactly what to do.",
+  "I am willing to do what it takes to have what I want.",
+  "The universe supports me.",
+  "Things are always working out for my highest good.",
+];
 
-  // Single Day Entry Form
-  const [logDate, setLogDate] = useState("2026-08-13");
-  const [logSteps, setLogSteps] = useState("");
-  const [workoutCompleted, setWorkoutCompleted] = useState<boolean | null>(null);
-  const [yogaCompleted, setYogaCompleted] = useState<boolean | null>(null);
-  const [singleStatus, setSingleStatus] = useState("");
-
-  // CSV File Upload
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [csvStatus, setCsvStatus] = useState("");
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError("");
-    const res = await fetch("/app-api/verify-passcode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode }),
-    });
-    if (res.ok) {
-      setIsAuthenticated(true);
-    } else {
-      setAuthError("Incorrect passcode");
+function getRankLabel(compositePct: number, stepsPct: number, workoutsPct: number) {
+  if (compositePct >= 85) {
+    if (stepsPct >= 75 && workoutsPct >= 75) {
+      return { label: "Master Thottie 👑", color: "text-success" };
     }
-  };
+    if (workoutsPct > stepsPct) {
+      return { label: "Lifting Heavy 🏋️‍♀️", color: "text-accent" };
+    }
+    return { label: "Step Queen 👟", color: "text-accent" };
+  }
+  return RANK_LABELS.find((r) => compositePct >= r.min) ?? RANK_LABELS[3];
+}
 
-  const { data: participants = [] } = useQuery<Participant[]>({
-    queryKey: ["admin-participants"],
-    queryFn: () => fetch("/app-api/participants").then((r) => r.json()),
-    enabled: isAuthenticated,
+function getProgressVariant(
+  pct: number,
+): "success" | "warning" | "error" | "default" {
+  if (pct >= 85) return "success";
+  if (pct >= 50) return "default";
+  if (pct >= 25) return "warning";
+  return "error";
+}
+
+function formatSteps(n: number) {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function formatLastUpdated(ts: string | null): string {
+  if (!ts) return "No updates logged yet";
+  const date = new Date(ts);
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+export default function Leaderboard() {
+  const [selectedGroupId, setSelectedGroupId] = useState<string>("all");
+  const [isPrivateGroupView, setIsPrivateGroupView] = useState<boolean>(false);
+  const [mantra, setMantra] = useState<string>("");
+
+  useEffect(() => {
+    const randomIndex = Math.floor(Math.random() * MANTRAS.length);
+    setMantra(MANTRAS[randomIndex]);
+  }, []);
+
+  const { data: groups = [] } = useQuery<Group[]>({
+    queryKey: ["groups"],
+    queryFn: () => fetch("/app-api/groups").then((r) => r.json()),
   });
 
-  const { data: recentLogs = [], refetch: refetchLogs } = useQuery<LogEntry[]>({
-    queryKey: ["recent-logs", selectedThottie?.id],
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlGroupParam = params.get("groupId") || params.get("group");
+    if (urlGroupParam && groups.length > 0) {
+      const matchedGroup = groups.find(
+        (g) =>
+          String(g.id) === urlGroupParam ||
+          g.name.toLowerCase() === urlGroupParam.toLowerCase()
+      );
+
+      if (matchedGroup) {
+        setSelectedGroupId(String(matchedGroup.id));
+        setIsPrivateGroupView(true);
+      }
+    }
+  }, [groups]);
+
+  const { data, isLoading, error } = useQuery<LeaderboardResponse | Participant[]>({
+    queryKey: ["leaderboard", selectedGroupId],
     queryFn: () =>
-      fetch(`/app-api/logs/${selectedThottie?.id}`).then((r) => r.json()),
-    enabled: !!selectedThottie,
+      fetch(`/app-api/leaderboard?groupId=${selectedGroupId}`).then((r) => r.json()),
+    refetchInterval: 30000,
   });
 
-  const addParticipantMutation = useMutation({
-    mutationFn: (newP: any) =>
-      fetch("/app-api/participants", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newP),
-      }).then((r) => r.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-participants"] });
-      setNewName("");
-      setNewLocation("");
-    },
-  });
-
-  const deleteParticipantMutation = useMutation({
-    mutationFn: (id: number) =>
-      fetch(`/app-api/participants/${id}`, { method: "DELETE" }).then((r) => r.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-participants"] });
-      if (selectedThottie?.id) setSelectedThottie(null);
-    },
-  });
-
-  const handleSingleEntrySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedThottie) {
-      setSingleStatus("Please choose a Thottie first.");
-      return;
-    }
-    if (!logSteps) {
-      setSingleStatus("Please enter step count.");
-      return;
-    }
-
-    setSingleStatus("Saving...");
-    const res = await fetch("/app-api/logs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        participant_id: selectedThottie.id,
-        log_date: logDate,
-        steps: Number(logSteps.replace(/[^0-9]/g, "")),
-        workout: workoutCompleted ? 1 : 0,
-        yoga: yogaCompleted ? 1 : 0,
-      }),
-    });
-
-    if (res.ok) {
-      setSingleStatus("Saved successfully!");
-      setLogSteps("");
-      setWorkoutCompleted(null);
-      setYogaCompleted(null);
-      refetchLogs();
-      queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
-    } else {
-      setSingleStatus("Failed to save entry.");
-    }
-  };
-
-  const splitCsvLine = (line: string): string[] => {
-    const result: string[] = [];
-    let current = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        result.push(current.trim().replace(/^"|"$/g, ""));
-        current = "";
-      } else {
-        current += char;
-      }
-    }
-    result.push(current.trim().replace(/^"|"$/g, ""));
-    return result;
-  };
-
-  const parseDateStr = (raw: string): string | null => {
-    if (!raw) return null;
-
-    let clean = raw.trim().replace(/^"|"$/g, "");
-    if (clean.includes("#") || clean.toLowerCase().includes("total") || clean.toLowerCase().includes("week")) {
-      return null;
-    }
-
-    clean = clean.replace(/^(mon|tue|wed|thu|fri|sat|sun)\w*\s*/i, "");
-
-    if (clean.match(/^\d{4}-\d{2}-\d{2}$/)) return clean;
-
-    const parts = clean.split(/[\/\-]/);
-    if (parts.length === 2) {
-      const m = parseInt(parts[0], 10);
-      const d = parseInt(parts[1], 10);
-      if (!isNaN(m) && !isNaN(d) && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-        const month = String(m).padStart(2, "0");
-        const day = String(d).padStart(2, "0");
-        return `2026-${month}-${day}`;
-      }
-    } else if (parts.length === 3) {
-      const m = parseInt(parts[0], 10);
-      const d = parseInt(parts[1], 10);
-      if (!isNaN(m) && !isNaN(d) && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-        const month = String(m).padStart(2, "0");
-        const day = String(d).padStart(2, "0");
-        const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
-        return `${year}-${month}-${day}`;
-      }
-    }
-    return null;
-  };
-
-  const handleFileUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!csvFile) {
-      setCsvStatus("Please choose a CSV file first.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        setCsvStatus("Processing multi-participant spreadsheet...");
-        const text = event.target?.result as string;
-        const rawLines = text.split("\n").filter((l) => l.trim().length > 0);
-        const lines = rawLines.map(splitCsvLine);
-
-        // Extract dates from row 1
-        const datesRow = lines[0] || [];
-        const dateMap: { col: number; dateStr: string }[] = [];
-        for (let col = 1; col < datesRow.length; col++) {
-          const parsed = parseDateStr(datesRow[col]);
-          if (parsed) {
-            dateMap.push({ col, dateStr: parsed });
-          }
-        }
-
-        if (dateMap.length === 0) {
-          setCsvStatus("Could not find date headers in row 1.");
-          return;
-        }
-
-        // Refetch latest participant list to map existing IDs
-        const currentParticipantsRes = await fetch("/app-api/participants");
-        let activeParticipants: Participant[] = await currentParticipantsRes.json();
-
-        let importedCount = 0;
-        let importedPeople = 0;
-
-        // Scan rows for participant blocks
-        for (let i = 1; i < lines.length; i++) {
-          const firstCol = (lines[i][0] || "").trim();
-          const headerLower = firstCol.toLowerCase();
-
-          // A name row is non-empty and not steps/workout/yoga/total/goal
-          if (
-            firstCol &&
-            !headerLower.includes("step") &&
-            !headerLower.includes("workout") &&
-            !headerLower.includes("yoga") &&
-            !headerLower.includes("total") &&
-            !headerLower.includes("goal")
-          ) {
-            const personName = firstCol;
-
-            // Look ahead for steps, workout, yoga rows
-            let stepsLine: string[] = [];
-            let workoutLine: string[] = [];
-            let yogaLine: string[] = [];
-
-            for (let k = i + 1; k < Math.min(i + 5, lines.length); k++) {
-              const rowLabel = (lines[k][0] || "").toLowerCase();
-              if (rowLabel.includes("step")) stepsLine = lines[k];
-              if (rowLabel.includes("workout")) workoutLine = lines[k];
-              if (rowLabel.includes("yoga")) yogaLine = lines[k];
-            }
-
-            if (stepsLine.length > 0) {
-              // Find or create participant
-              let participant = activeParticipants.find(
-                (p) => p.name.toLowerCase().trim() === personName.toLowerCase().trim()
-              );
-
-              if (!participant) {
-                const newP = await addParticipantMutation.mutateAsync({
-                  name: personName,
-                  location: "",
-                  steps_goal: 280000,
-                  workouts_goal: 12,
-                });
-                participant = newP;
-                activeParticipants.push(newP);
-              }
-
-              if (participant) {
-                const logs = [];
-                for (const d of dateMap) {
-                  const rawSteps = (stepsLine[d.col] || "").replace(/[^0-9]/g, "");
-                  const steps = parseInt(rawSteps, 10) || 0;
-
-                  const rawWorkout = (workoutLine[d.col] || "").replace(/[^0-9.]/g, "");
-                  const workoutVal = parseFloat(rawWorkout) || 0;
-
-                  const rawYoga = (yogaLine[d.col] || "").replace(/[^0-9.]/g, "");
-                  const yogaVal = parseFloat(rawYoga) || 0;
-
-                  if (steps > 0 || workoutVal > 0 || yogaVal > 0) {
-                    logs.push({
-                      log_date: d.dateStr,
-                      steps,
-                      workout: workoutVal > 0 ? 1 : 0,
-                      yoga: yogaVal > 0 ? 1 : 0,
-                    });
-                  }
-                }
-
-                if (logs.length > 0) {
-                  const res = await fetch("/app-api/logs/bulk", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      participant_id: participant.id,
-                      logs,
-                    }),
-                  });
-
-                  if (res.ok) {
-                    importedCount += logs.length;
-                    importedPeople++;
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        if (importedPeople > 0) {
-          setCsvStatus(`Successfully imported ${importedCount} logs across ${importedPeople} participants!`);
-          setCsvFile(null);
-          refetchLogs();
-          queryClient.invalidateQueries({ queryKey: ["admin-participants"] });
-          queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
-        } else {
-          setCsvStatus("No valid logs imported from spreadsheet.");
-        }
-      } catch (err: any) {
-        setCsvStatus(`Error: ${err.message}`);
-      }
-    };
-    reader.readAsText(csvFile);
-  };
-
-  if (!isAuthenticated) {
+  if (isLoading) {
     return (
-      <div className="max-w-md mx-auto mt-12 bg-white border border-gray-200 p-6 rounded-lg shadow-sm space-y-4">
-        <h2 className="text-lg font-bold flex items-center gap-2 text-gray-800">
-          <Key className="size-5 text-gray-700" /> Admin Access
-        </h2>
-        <form onSubmit={handleLogin} className="space-y-3">
-          <input
-            type="password"
-            placeholder="Enter Admin Passcode"
-            value={passcode}
-            onChange={(e) => setPasscode(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-300 px-3 py-2 rounded-md text-sm text-gray-900 focus:outline-none"
-          />
-          {authError && <p className="text-xs text-red-600">{authError}</p>}
-          <button
-            type="submit"
-            className="w-full bg-gray-800 hover:bg-gray-900 text-white py-2 rounded-md text-sm font-semibold transition"
-          >
-            Unlock Admin
-          </button>
-        </form>
+      <div className="space-y-4 mt-4">
+        <div className="h-8 bg-inset rounded-md animate-pulse w-48" />
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="h-40 bg-inset rounded-lg animate-pulse" />
+        ))}
       </div>
     );
   }
 
+  if (error) {
+    return (
+      <div className="rounded-md border border-error bg-error-weak p-4 text-sm text-error mt-4">
+        Failed to load leaderboard. Please refresh.
+      </div>
+    );
+  }
+
+  const participants: Participant[] = Array.isArray(data) ? data : data?.rows || [];
+  const lastUpdated: string | null = Array.isArray(data) ? null : data?.lastUpdated || null;
+
+  const currentGroupObj = groups.find((g) => String(g.id) === selectedGroupId);
+
+  // 6-Week Minimester Dates: November 16, 2026 to December 27, 2026
+  const semesterStart = new Date(2026, 10, 16);
+  const TOTAL_WEEKS = 6;
+  const TOTAL_DAYS = 42;
+
+  const dateRangeLabel = "November 16 – December 27, 2026";
+
+  const now = new Date();
+  const diffInMs = Math.max(0, now.getTime() - semesterStart.getTime());
+  const daysElapsed = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+  let weeksElapsed = Math.min(TOTAL_WEEKS, Math.max(1, Math.floor(daysElapsed / 7) + 1));
+  let semesterProgressPct = Math.min(100, Math.max(0, Math.round((daysElapsed / TOTAL_DAYS) * 100)));
+
+  if (daysElapsed >= TOTAL_DAYS) {
+    weeksElapsed = 6;
+    semesterProgressPct = 100;
+  }
+
   return (
-    <div className="space-y-6 text-gray-900">
-      <h1 className="text-2xl font-bold tracking-tight">Log Entries</h1>
-
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-        {/* Left Column (Forms) */}
-        <div className="md:col-span-7 space-y-6">
-          {/* Manage Thotties Accordion */}
-          <div className="border border-gray-200 bg-white rounded-lg overflow-hidden shadow-sm">
-            <button
-              onClick={() => setShowManageThotties(!showManageThotties)}
-              className="w-full px-4 py-3 text-left font-medium text-sm flex items-center justify-between text-gray-800 hover:bg-gray-50"
-            >
-              <span className="flex items-center gap-2">
-                <UserPlus className="size-4" /> Manage Thotties (Add / Remove)
-              </span>
-              {showManageThotties ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-            </button>
-
-            {showManageThotties && (
-              <div className="p-4 border-t border-gray-200 space-y-4 bg-gray-50">
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    placeholder="Name"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    className="bg-white border border-gray-300 px-3 py-1.5 rounded-md text-sm"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Location (e.g. CA)"
-                    value={newLocation}
-                    onChange={(e) => setNewLocation(e.target.value)}
-                    className="bg-white border border-gray-300 px-3 py-1.5 rounded-md text-sm"
-                  />
-                </div>
-                <button
-                  onClick={() =>
-                    addParticipantMutation.mutate({
-                      name: newName,
-                      location: newLocation,
-                      steps_goal: newStepsGoal,
-                      workouts_goal: newWorkoutsGoal,
-                    })
-                  }
-                  className="bg-gray-800 text-white px-3 py-1.5 rounded-md text-xs font-semibold"
-                >
-                  Add Thottie
-                </button>
-
-                <div className="divide-y divide-gray-200 pt-2">
-                  {participants.map((p) => (
-                    <div key={p.id} className="py-2 flex items-center justify-between text-xs">
-                      <span>{p.name} ({p.location || "N/A"})</span>
-                      <button
-                        onClick={() => deleteParticipantMutation.mutate(p.id)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+    <div className="space-y-6">
+      {/* Upgraded Mantra Card */}
+      {mantra && (
+        <div className="relative overflow-hidden rounded-2xl border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-slate-900/90 to-purple-950/40 p-5 text-center shadow-xl shadow-purple-950/20 backdrop-blur-md">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-[11px] font-bold uppercase tracking-widest text-purple-300 mb-2 shadow-inner">
+            <Sparkles className="size-3 text-purple-400 animate-pulse" />
+            <span>Daily Mantra</span>
+            <Sparkles className="size-3 text-purple-400 animate-pulse" />
           </div>
-
-          {/* Step 1: Choose Thottie Grid */}
-          <div className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-600">
-              Step 1: Choose Thottie (For Single Entry or CSV)
-            </h2>
-            <div className="grid grid-cols-2 gap-2">
-              {participants.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setSelectedThottie(p)}
-                  className={`px-3 py-2 text-left rounded-md border text-xs font-medium transition ${
-                    selectedThottie?.id === p.id
-                      ? "border-gray-800 bg-gray-800 text-white"
-                      : "border-gray-200 bg-white text-gray-800 hover:border-gray-400"
-                  }`}
-                >
-                  {p.name} {p.location ? `(${p.location})` : ""}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Option A: Single Day Entry */}
-          <form
-            onSubmit={handleSingleEntrySubmit}
-            className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-4"
-          >
-            <h2 className="text-sm font-bold text-gray-900">Option A: Single Day Entry</h2>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                <Calendar className="size-3.5" /> Date
-              </label>
-              <input
-                type="date"
-                value={logDate}
-                onChange={(e) => setLogDate(e.target.value)}
-                className="w-full bg-white border border-gray-300 rounded-md px-3 py-1.5 text-sm"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                <Footprints className="size-3.5" /> Steps
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. 8,432"
-                value={logSteps}
-                onChange={(e) => setLogSteps(e.target.value)}
-                className="w-full bg-white border border-gray-300 rounded-md px-3 py-1.5 text-sm"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                <Dumbbell className="size-3.5" /> Workout completed?
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setWorkoutCompleted(true)}
-                  className={`py-1.5 rounded-md border text-xs font-semibold flex items-center justify-center gap-1 ${
-                    workoutCompleted === true ? "bg-gray-800 text-white" : "border-gray-300 text-gray-700"
-                  }`}
-                >
-                  <Check className="size-3.5" /> Yes
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWorkoutCompleted(false)}
-                  className={`py-1.5 rounded-md border text-xs font-semibold flex items-center justify-center gap-1 ${
-                    workoutCompleted === false ? "bg-gray-800 text-white" : "border-gray-300 text-gray-700"
-                  }`}
-                >
-                  No
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
-                Yoga completed?
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setYogaCompleted(true)}
-                  className={`py-1.5 rounded-md border text-xs font-semibold flex items-center justify-center gap-1 ${
-                    yogaCompleted === true ? "bg-gray-800 text-white" : "border-gray-300 text-gray-700"
-                  }`}
-                >
-                  <Check className="size-3.5" /> Yes
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setYogaCompleted(false)}
-                  className={`py-1.5 rounded-md border text-xs font-semibold flex items-center justify-center gap-1 ${
-                    yogaCompleted === false ? "bg-gray-800 text-white" : "border-gray-300 text-gray-700"
-                  }`}
-                >
-                  No
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-md text-xs font-bold transition"
-            >
-              Save Single Entry
-            </button>
-            {singleStatus && <p className="text-xs font-medium text-gray-700 mt-1">{singleStatus}</p>}
-          </form>
-
-          {/* Option B: Upload Spreadsheet CSV */}
-          <form
-            onSubmit={handleFileUpload}
-            className="border border-gray-200 bg-white p-4 rounded-lg shadow-sm space-y-3"
-          >
-            <h2 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
-              <Upload className="size-4" /> Option B: Upload Spreadsheet (CSV)
-            </h2>
-            <p className="text-xs text-gray-500">
-              Upload full Tracking Sheet or single-person CSV.
+          <div className="relative flex items-center justify-center gap-2">
+            <Quote className="size-5 text-purple-500/40 rotate-180 shrink-0 hidden sm:inline" />
+            <p className="text-base sm:text-lg font-medium italic text-white tracking-wide leading-relaxed">
+              {mantra}
             </p>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
-              className="text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
-            />
-            <button
-              type="submit"
-              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-md text-xs font-bold transition"
-            >
-              Upload Spreadsheet
-            </button>
-            {csvStatus && <p className="text-xs font-medium text-gray-700 mt-1">{csvStatus}</p>}
-          </form>
+            <Quote className="size-5 text-purple-500/40 shrink-0 hidden sm:inline" />
+          </div>
+        </div>
+      )}
+
+      {/* Group / Cohort Selector */}
+      {!isPrivateGroupView && groups.length > 0 && (
+        <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between gap-4 shadow-sm">
+          <label className="text-xs font-semibold text-slate-300 flex items-center gap-2 shrink-0">
+            <Users className="size-4 text-purple-400" /> Select Group / Cohort:
+          </label>
+          <select
+            value={selectedGroupId}
+            onChange={(e) => setSelectedGroupId(e.target.value)}
+            className="bg-slate-950 border border-slate-700 text-white font-medium rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-purple-500 cursor-pointer max-w-xs w-full transition"
+          >
+            <option value="all">All Groups</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Hero Header with Stacked Badges */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-1">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+            {currentGroupObj ? `${currentGroupObj.name} Progress` : "Minimester Progress"}
+          </h1>
+          <p className="text-xs text-secondary flex items-center gap-1.5 mt-1.5">
+            <Clock className="size-3.5 text-slate-500" />
+            Last Updated: <span className="font-medium text-slate-300">{formatLastUpdated(lastUpdated)}</span>
+          </p>
         </div>
 
-        {/* Right Column: Select a Thottie Details */}
-        <div className="md:col-span-5">
-          <div className="border border-gray-200 bg-white p-5 rounded-lg shadow-sm min-h-[300px]">
-            <h2 className="text-sm font-semibold text-gray-800">
-              {selectedThottie ? `${selectedThottie.name}'s Recent Entries` : "Select a Thottie"}
-            </h2>
+        {/* Stacked Timeline Badges */}
+        <div className="flex flex-col items-start md:items-end gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-slate-300 shadow-sm">
+            <CalendarDays className="size-3.5 text-purple-400" />
+            <span>Week <strong className="text-white">{weeksElapsed}</strong> of {TOTAL_WEEKS}</span>
+            <span className="text-slate-500">·</span>
+            <span className="text-slate-400">{dateRangeLabel}</span>
+          </span>
 
-            {!selectedThottie ? (
-              <p className="text-xs text-gray-500 mt-8 text-center">
-                Choose a Thottie on the left to see their recent entries.
-              </p>
-            ) : (
-              <div className="mt-4 space-y-2">
-                {recentLogs.length === 0 ? (
-                  <p className="text-xs text-gray-400">No entries logged yet.</p>
-                ) : (
-                  recentLogs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="p-2.5 bg-gray-50 border border-gray-100 rounded-md text-xs flex items-center justify-between"
-                    >
-                      <div>
-                        <p className="font-semibold text-gray-800">{log.log_date}</p>
-                        <p className="text-gray-500">
-                          {log.steps.toLocaleString()} steps · {log.workout ? "Workout" : "No Workout"}
-                          {log.yoga ? " · Yoga" : ""}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 shadow-sm">
+            <TrendingUp className="size-3.5 text-purple-400" />
+            <span>Minimester: <strong className="text-white font-bold">{semesterProgressPct}%</strong> complete</span>
+          </span>
         </div>
       </div>
+
+      {/* Semester progress rail */}
+      <div className="space-y-1.5">
+        <Progress value={semesterProgressPct} aria-label="Minimester progress" />
+      </div>
+
+      {/* Player cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {participants.map((p, idx) => {
+          const compositePct = (p.steps_pct + p.workouts_pct) / 2;
+          const rank = getRankLabel(compositePct, p.steps_pct, p.workouts_pct);
+          const medal = MEDALS[idx] ?? null;
+          const stepsLeft = Math.max(0, p.steps_goal - p.steps_total);
+          const workoutsLeft = Math.max(0, p.workouts_goal - p.workouts_total);
+
+          return (
+            <div
+              key={p.id}
+              className="bg-raised border border-border rounded-lg p-5 space-y-4"
+            >
+              {/* Name + rank */}
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    {medal && <span className="text-2xl">{medal}</span>}
+                    {!medal && idx < 6 && (
+                      <span className="text-lg font-bold text-secondary">
+                        #{idx + 1}
+                      </span>
+                    )}
+                    <div>
+                      <h2 className="text-base font-semibold">{p.name}</h2>
+                      {p.location && <p className="text-xs text-secondary">{p.location}</p>}
+                    </div>
+                  </div>
+                </div>
+                <span className={`text-xs font-medium ${rank.color}`}>
+                  {rank.label}
+                </span>
+              </div>
+
+              {/* Steps */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5 text-secondary">
+                    <Footprints className="size-3.5" />
+                    Steps
+                  </span>
+                  <span className="font-semibold">
+                    {formatSteps(p.steps_total)}
+                    <span className="text-secondary font-normal text-xs">
+                      /{formatSteps(p.steps_goal)}
+                    </span>
+                  </span>
+                </div>
+                <Progress
+                  value={Math.min(100, p.steps_pct)}
+                  variant={getProgressVariant(p.steps_pct)}
+                  aria-label={`${p.name} steps progress`}
+                />
+                <p className="text-xs text-secondary">
+                  {p.steps_pct.toFixed(1)}% complete
+                  {stepsLeft > 0 && ` · ${formatSteps(stepsLeft)} to go`}
+                </p>
+              </div>
+
+              {/* Workouts */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5 text-secondary">
+                    <Dumbbell className="size-3.5" />
+                    Workouts
+                  </span>
+                  <span className="font-semibold">
+                    {p.workouts_total}
+                    <span className="text-secondary font-normal text-xs">
+                      /{p.workouts_goal} required
+                    </span>
+                  </span>
+                </div>
+                <Progress
+                  value={Math.min(100, p.workouts_pct)}
+                  variant={getProgressVariant(p.workouts_pct)}
+                  aria-label={`${p.name} workouts progress`}
+                />
+                <p className="text-xs text-secondary">
+                  {p.workouts_pct.toFixed(1)}% complete
+                  {workoutsLeft > 0 && ` · ${workoutsLeft} sessions to go`}
+                </p>
+              </div>
+
+              {/* This week */}
+              <div className="rounded-md bg-inset p-3 space-y-2">
+                <p className="text-xs font-medium text-secondary flex items-center gap-1.5">
+                  <CalendarDays className="size-3.5" /> This week
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-secondary">Steps</span>
+                      <span
+                        className={`font-semibold ${
+                          p.week_steps >= WEEK_STEPS_GOAL
+                            ? "text-success"
+                            : "text-primary"
+                        }`}
+                      >
+                        {formatSteps(p.week_steps)}
+                        <span className="text-secondary font-normal">
+                          /{formatSteps(WEEK_STEPS_GOAL)}
+                        </span>
+                      </span>
+                    </div>
+                    <Progress
+                      value={Math.min(
+                        100,
+                        Math.round((p.week_steps / WEEK_STEPS_GOAL) * 100),
+                      )}
+                      variant={
+                        p.week_steps >= WEEK_STEPS_GOAL
+                          ? "success"
+                          : p.week_steps >= WEEK_STEPS_GOAL * 0.5
+                            ? "default"
+                            : "warning"
+                      }
+                      aria-label={`${p.name} this week steps`}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-secondary">Workouts</span>
+                      <span
+                        className={`font-semibold ${
+                          p.week_workouts >= WEEK_WORKOUTS_GOAL
+                            ? "text-success"
+                            : "text-primary"
+                        }`}
+                      >
+                        {p.week_workouts}
+                        <span className="text-secondary font-normal">
+                          /{WEEK_WORKOUTS_GOAL}
+                        </span>
+                      </span>
+                    </div>
+                    <Progress
+                      value={Math.min(
+                        100,
+                        Math.round(
+                          (p.week_workouts / WEEK_WORKOUTS_GOAL) * 100,
+                        ),
+                      )}
+                      variant={
+                        p.week_workouts >= WEEK_WORKOUTS_GOAL
+                          ? "success"
+                          : p.week_workouts >= 1
+                            ? "default"
+                            : "warning"
+                      }
+                      aria-label={`${p.name} this week workouts`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Overall score bubble */}
+              <div className="flex items-center justify-between pt-1 border-t border-border-weak">
+                <span className="text-xs text-secondary flex items-center gap-1">
+                  <Award className="size-3.5" />
+                  Minimester total
+                </span>
+                <div className="flex items-center gap-3">
+                  {p.yoga_total > 0 && (
+                    <span className="text-xs text-success flex items-center gap-1 font-medium bg-success-weak px-2 py-0.5 rounded">
+                      <Leaf className="size-3" /> {p.yoga_total} Yoga
+                    </span>
+                  )}
+                  <div>
+                    <span className="text-sm font-bold text-accent">
+                      {compositePct.toFixed(1)}%
+                    </span>
+                    <span className="text-xs text-secondary ml-1">overall</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {participants.length === 0 && (
+        <div className="text-center py-16 text-secondary bg-raised border border-border rounded-lg">
+          <p className="text-base">
+            No Thotties found in this group — add some or pick another group!
+          </p>
+        </div>
+      )}
     </div>
   );
 }
