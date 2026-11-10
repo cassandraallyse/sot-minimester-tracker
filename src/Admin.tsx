@@ -662,7 +662,7 @@ export default function Admin() {
                     disabled={addingParticipant}
                     className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition"
                   >
-                    Add Participant (420k steps · 18 workouts)
+                    Add Participant
                   </button>
                 </form>
                 <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
