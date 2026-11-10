@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Progress } from "./components/Progress";
 import {
   Footprints,
   Dumbbell,
@@ -13,6 +12,41 @@ import {
   Sparkles,
   Quote,
 } from "lucide-react";
+
+// Self-contained progress bar to avoid import path issues
+function ProgressBar({
+  value,
+  variant = "default",
+  "aria-label": ariaLabel,
+}: {
+  value: number;
+  variant?: "success" | "warning" | "error" | "default";
+  "aria-label"?: string;
+}) {
+  const clamped = Math.min(100, Math.max(0, value));
+  const variantColors = {
+    default: "bg-purple-500",
+    success: "bg-emerald-400",
+    warning: "bg-amber-400",
+    error: "bg-rose-500",
+  };
+
+  return (
+    <div
+      role="progressbar"
+      aria-label={ariaLabel}
+      aria-valuenow={clamped}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800"
+    >
+      <div
+        className={`h-full transition-all duration-300 rounded-full ${variantColors[variant]}`}
+        style={{ width: `${clamped}%` }}
+      />
+    </div>
+  );
+}
 
 type Group = {
   id: number;
@@ -213,197 +247,4 @@ export default function Leaderboard() {
       {/* Cohort Selector */}
       {!isPrivateGroupView && groups.length > 0 && (
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between gap-4 shadow-sm">
-          <label className="text-xs font-semibold text-slate-300 flex items-center gap-2 shrink-0">
-            <Users className="size-4 text-purple-400" /> Select Group / Cohort:
-          </label>
-          <select
-            value={selectedGroupId}
-            onChange={(e) => setSelectedGroupId(e.target.value)}
-            className="bg-slate-950 border border-slate-700 text-white font-medium rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-purple-500 cursor-pointer max-w-xs w-full"
-          >
-            <option value="all">All Groups</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-1">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-            {currentGroupObj ? `${currentGroupObj.name} Progress` : "Minimester Progress"}
-          </h1>
-          <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-1.5">
-            <Clock className="size-3.5 text-slate-500" />
-            Last Updated: <span className="font-medium text-slate-300">{formatLastUpdated(lastUpdated)}</span>
-          </p>
-        </div>
-
-        <div className="flex flex-col items-start md:items-end gap-2">
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300 shadow-sm">
-            <CalendarDays className="size-3.5 text-purple-400" />
-            <span>Week <strong className="text-white">{weeksElapsed}</strong> of {TOTAL_WEEKS}</span>
-            <span className="text-slate-500">·</span>
-            <span className="text-slate-400">{dateRangeLabel}</span>
-          </span>
-
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 shadow-sm">
-            <TrendingUp className="size-3.5 text-purple-400" />
-            <span>Minimester: <strong className="text-white font-bold">{semesterProgressPct}%</strong> complete</span>
-          </span>
-        </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <Progress value={semesterProgressPct} aria-label="Minimester progress" />
-      </div>
-
-      {/* Leaderboard Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {participants.map((p, idx) => {
-          const compositePct = (p.steps_pct + p.workouts_pct) / 2;
-          const rank = getRankLabel(compositePct, p.steps_pct, p.workouts_pct);
-          const medal = MEDALS[idx] ?? null;
-          const stepsLeft = Math.max(0, p.steps_goal - p.steps_total);
-          const workoutsLeft = Math.max(0, p.workouts_goal - p.workouts_total);
-
-          return (
-            <div
-              key={p.id}
-              className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-4 shadow-sm"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2">
-                  {medal && <span className="text-2xl">{medal}</span>}
-                  {!medal && idx < 6 && (
-                    <span className="text-lg font-bold text-slate-500">#{idx + 1}</span>
-                  )}
-                  <div>
-                    <h2 className="text-base font-semibold text-white">{p.name}</h2>
-                    {p.location && <p className="text-xs text-slate-400">{p.location}</p>}
-                  </div>
-                </div>
-                <span className={`text-xs font-medium ${rank.color}`}>
-                  {rank.label}
-                </span>
-              </div>
-
-              {/* Steps */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-1.5 text-slate-400">
-                    <Footprints className="size-3.5 text-purple-400" /> Steps
-                  </span>
-                  <span className="font-semibold text-white">
-                    {formatSteps(p.steps_total)}
-                    <span className="text-slate-400 font-normal text-xs">
-                      /{formatSteps(p.steps_goal)}
-                    </span>
-                  </span>
-                </div>
-                <Progress
-                  value={Math.min(100, p.steps_pct)}
-                  variant={getProgressVariant(p.steps_pct)}
-                  aria-label={`${p.name} steps progress`}
-                />
-                <p className="text-xs text-slate-400">
-                  {p.steps_pct.toFixed(1)}% complete
-                  {stepsLeft > 0 && ` · ${formatSteps(stepsLeft)} to go`}
-                </p>
-              </div>
-
-              {/* Workouts */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-1.5 text-slate-400">
-                    <Dumbbell className="size-3.5 text-sky-400" /> Workouts
-                  </span>
-                  <span className="font-semibold text-white">
-                    {p.workouts_total}
-                    <span className="text-slate-400 font-normal text-xs">
-                      /{p.workouts_goal} required
-                    </span>
-                  </span>
-                </div>
-                <Progress
-                  value={Math.min(100, p.workouts_pct)}
-                  variant={getProgressVariant(p.workouts_pct)}
-                  aria-label={`${p.name} workouts progress`}
-                />
-                <p className="text-xs text-slate-400">
-                  {p.workouts_pct.toFixed(1)}% complete
-                  {workoutsLeft > 0 && ` · ${workoutsLeft} sessions to go`}
-                </p>
-              </div>
-
-              {/* Weekly Tracker */}
-              <div className="rounded-lg bg-slate-950/60 border border-slate-800/80 p-3 space-y-2">
-                <p className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
-                  <CalendarDays className="size-3.5 text-purple-400" /> This week
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-400">Steps</span>
-                      <span className={`font-semibold ${p.week_steps >= WEEK_STEPS_GOAL ? "text-emerald-400" : "text-white"}`}>
-                        {formatSteps(p.week_steps)}
-                        <span className="text-slate-500 font-normal">/{formatSteps(WEEK_STEPS_GOAL)}</span>
-                      </span>
-                    </div>
-                    <Progress
-                      value={Math.min(100, Math.round((p.week_steps / WEEK_STEPS_GOAL) * 100))}
-                      variant={p.week_steps >= WEEK_STEPS_GOAL ? "success" : "default"}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-400">Workouts</span>
-                      <span className={`font-semibold ${p.week_workouts >= WEEK_WORKOUTS_GOAL ? "text-emerald-400" : "text-white"}`}>
-                        {p.week_workouts}
-                        <span className="text-slate-500 font-normal">/{WEEK_WORKOUTS_GOAL}</span>
-                      </span>
-                    </div>
-                    <Progress
-                      value={Math.min(100, Math.round((p.week_workouts / WEEK_WORKOUTS_GOAL) * 100))}
-                      variant={p.week_workouts >= WEEK_WORKOUTS_GOAL ? "success" : "default"}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Score Footer */}
-              <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-                <span className="text-xs text-slate-400 flex items-center gap-1">
-                  <Award className="size-3.5 text-amber-400" /> Minimester Total
-                </span>
-                <div className="flex items-center gap-3">
-                  {p.yoga_total > 0 && (
-                    <span className="text-xs text-emerald-400 flex items-center gap-1 font-medium bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
-                      <Leaf className="size-3" /> {p.yoga_total} Yoga
-                    </span>
-                  )}
-                  <div>
-                    <span className="text-sm font-bold text-purple-400">
-                      {compositePct.toFixed(1)}%
-                    </span>
-                    <span className="text-xs text-slate-400 ml-1">overall</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {participants.length === 0 && (
-        <div className="text-center py-16 text-slate-400 bg-slate-900/60 border border-slate-800 rounded-xl">
-          <p className="text-sm">
-            No participants found in this group yet — add some in Admin!
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
+          <label className="text-xs font-semibold text
