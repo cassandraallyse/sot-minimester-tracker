@@ -351,7 +351,7 @@ app.post("/app-api/logs/bulk", async (c) => {
   }
 });
 
-// POST /app-api/sync-sheet (Automated Google Sheet Ingestion with Diagnostics)
+// POST /app-api/sync-sheet (Multi-Group Google Sheet Ingestion)
 app.post("/app-api/sync-sheet", async (c) => {
   try {
     const authHeader = c.req.header("Authorization");
@@ -362,18 +362,33 @@ app.post("/app-api/sync-sheet", async (c) => {
     }
 
     const body = await c.req.json();
-    const { rows } = body;
+    const { rows, groupName } = body;
 
     if (!Array.isArray(rows) || rows.length < 2) {
       return c.json({ error: "Invalid rows format: spreadsheet data too short" }, 400);
     }
 
     const sql = getDb();
-    const participants = await sql`SELECT id, name FROM sot_participants`;
+
+    // Match group ID if groupName was provided (e.g., "Group 1")
+    let targetGroupId: number | null = null;
+    if (groupName) {
+      const [g] = await sql`
+        SELECT id FROM sot_groups 
+        WHERE LOWER(TRIM(name)) = LOWER(TRIM(${groupName})) 
+        LIMIT 1
+      `;
+      if (g) targetGroupId = g.id;
+    }
+
+    // Filter participants by group if a group was matched
+    const participants = targetGroupId
+      ? await sql`SELECT id, name FROM sot_participants WHERE group_id = ${targetGroupId}`
+      : await sql`SELECT id, name FROM sot_participants`;
 
     // 1. Locate date columns in header row
     const headerCols: any[] = rows[0] || [];
-    const dateColIndices: { idx: number; isoDate: string; header: string }[] = [];
+    const dateColIndices: { idx: number; isoDate: string }[] = [];
 
     headerCols.forEach((col, idx) => {
       const colStr = String(col ?? "").trim();
@@ -383,23 +398,22 @@ app.post("/app-api/sync-sheet", async (c) => {
         const m = slashMatch[1].padStart(2, "0");
         const d = slashMatch[2].padStart(2, "0");
         const y = slashMatch[3];
-        dateColIndices.push({ idx, isoDate: `${y}-${m}-${d}`, header: colStr });
+        dateColIndices.push({ idx, isoDate: `${y}-${m}-${d}` });
         return;
       }
 
       const isoMatch = colStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
       if (isoMatch) {
-        dateColIndices.push({ idx, isoDate: `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`, header: colStr });
+        dateColIndices.push({ idx, isoDate: `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}` });
       }
     });
 
     if (dateColIndices.length === 0) {
-      return c.json({ error: "No date columns found in header" }, 400);
+      return c.json({ error: "No date columns found in sheet header" }, 400);
     }
 
     // 2. Parse matrix sheet rows into participant logs
     let currentParticipantId: number | null = null;
-    let currentParticipantName: string | null = null;
     let rowTypes: Record<string, any[]> = {};
     const bulkPayloads: { participant_id: number; logs: any[] }[] = [];
 
@@ -429,7 +443,6 @@ app.post("/app-api/sync-sheet", async (c) => {
         });
 
         currentParticipantId = matchP ? matchP.id : null;
-        currentParticipantName = matchP ? matchP.name : null;
         rowTypes = {};
       }
     }
@@ -457,24 +470,11 @@ app.post("/app-api/sync-sheet", async (c) => {
       }
     }
 
-    // Diagnostic payload to inspect Jessica's exact parsed logs
-    const jessicaPayload = bulkPayloads.find(p => {
-      const pData = participants.find((pt: any) => pt.id === p.participant_id);
-      return pData?.name?.toLowerCase().includes("jessica");
-    });
-
-    const datesFound = dateColIndices.map(d => d.isoDate);
-
     return c.json({
       success: true,
+      group: groupName || "all",
       participantsSynced: bulkPayloads.length,
       totalEntriesSynced: totalEntries,
-      diagnostics: {
-        lastThreeDatesDetected: datesFound.slice(-3),
-        totalDatesDetected: datesFound.length,
-        jessicaLogsCount: jessicaPayload ? jessicaPayload.logs.length : 0,
-        jessicaLastThreeLogs: jessicaPayload ? jessicaPayload.logs.slice(-3) : null
-      }
     });
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
