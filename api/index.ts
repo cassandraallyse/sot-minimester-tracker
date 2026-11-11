@@ -358,7 +358,7 @@ app.post("/app-api/logs/bulk", async (c) => {
   }
 });
 
-// POST /app-api/sync-sheet (Multi-Group Auto-Creation & Ingestion)
+// POST /app-api/sync-sheet (Multi-Group Auto-Creation with Strict Instruction Filtering)
 app.post("/app-api/sync-sheet", async (c) => {
   try {
     const authHeader = c.req.header("Authorization");
@@ -440,6 +440,19 @@ app.post("/app-api/sync-sheet", async (c) => {
 
         // Clean: "Amy R. (CO), wants tighter macros" -> name: "Amy R.", location: "CO"
         const { name: parsedName, location: parsedLocation } = parseParticipantHeader(firstCol);
+
+        // Guard against spreadsheet instructions, sentences, notes, or long descriptions
+        const isLikelyInstruction = 
+          parsedName.length > 35 || 
+          parsedName.split(" ").length > 5 ||
+          /^(instructions|directions|note|please|how to|rules|reminder|tracker)/i.test(parsedName.trim());
+
+        if (isLikelyInstruction || !parsedName) {
+          currentParticipantId = null;
+          rowTypes = {};
+          continue;
+        }
+
         const firstName = parsedName.split(" ")[0].toLowerCase();
 
         let matchP = participants.find((p: any) => {
@@ -452,7 +465,7 @@ app.post("/app-api/sync-sheet", async (c) => {
         });
 
         // Auto-provision if not found in database (Minimester: 420k steps, 18 workouts)
-        if (!matchP && targetGroupId && parsedName) {
+        if (!matchP && targetGroupId) {
           const [newP] = await sql`
             INSERT INTO sot_participants (name, location, group_id, steps_goal, workouts_goal)
             VALUES (${parsedName}, ${parsedLocation}, ${targetGroupId}, 420000, 18)
