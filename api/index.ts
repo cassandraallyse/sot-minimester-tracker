@@ -358,7 +358,7 @@ app.post("/app-api/logs/bulk", async (c) => {
   }
 });
 
-// POST /app-api/sync-sheet (Multi-Group Auto-Creation with Strict Instruction Filtering)
+// POST /app-api/sync-sheet (Multi-Group Auto-Creation with Strict Instruction & Placeholder Filtering)
 app.post("/app-api/sync-sheet", async (c) => {
   try {
     const authHeader = c.req.header("Authorization");
@@ -441,13 +441,13 @@ app.post("/app-api/sync-sheet", async (c) => {
         // Clean: "Amy R. (CO), wants tighter macros" -> name: "Amy R.", location: "CO"
         const { name: parsedName, location: parsedLocation } = parseParticipantHeader(firstCol);
 
-        // Guard against spreadsheet instructions, sentences, notes, or long descriptions
-        const isLikelyInstruction = 
-          parsedName.length > 35 || 
-          parsedName.split(" ").length > 5 ||
-          /^(instructions|directions|note|please|how to|rules|reminder|tracker)/i.test(parsedName.trim());
+        // Guard against instructions, placeholder text, template headers, and descriptions
+        const isInstructionOrPlaceholder = 
+          parsedName.length > 30 || 
+          parsedName.split(" ").length > 4 ||
+          /(student|first name|last name|last initial|placeholder|template|example|instructions|directions|note|please|how to|rules|reminder|tracker)/i.test(firstCol);
 
-        if (isLikelyInstruction || !parsedName) {
+        if (isInstructionOrPlaceholder || !parsedName) {
           currentParticipantId = null;
           rowTypes = {};
           continue;
